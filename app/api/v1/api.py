@@ -6,9 +6,11 @@ from app.api.v1.endpoints import (
     menu,
     tables,
     orders,
-    chat,
+    # Replaced complex chat with simple chat endpoints
+    simple_chat_endpoints as simple_chat,
+    # Keep universal and others
     universal,    # NEW
-    dedicated_chat,  # NEW - Dedicated cafe chat
+    # Replaced dedicated_chat with simple chat as well
     dashboard,    # NEW
     kitchen,      # NEW
     onboarding,
@@ -23,7 +25,8 @@ from app.api.v1.endpoints import (
     bookings,     # NEW - Booking system
     waitlist,     # NEW - Waitlist management
     inventory,    # NEW - Inventory management
-    categories,   # NEW - Business categories
+    # Add simple business endpoints
+    simple_business_endpoints as simple_business,
 )
 
 # Create main router
@@ -61,16 +64,12 @@ api_router.include_router(
 )
 
 api_router.include_router(
-    chat.router,
+    simple_chat.router,
     prefix="/chat",
-    tags=["Chat System"]
+    tags=["Chat (Simple)"]
 )
 
-api_router.include_router(
-    dedicated_chat.router,
-    prefix="/dedicated-chat",
-    tags=["Dedicated Cafe Chat"]
-)
+# Note: Dedicated cafe chat replaced by simple chat; remove old include
 
 api_router.include_router(
     dashboard.router,
@@ -156,8 +155,11 @@ api_router.include_router(
     tags=["Inventory Management"]
 )
 
+# categories router temporarily disabled due to missing service dependency
+
+# Include simple business endpoints at root (no extra prefix)
 api_router.include_router(
-    categories.router,
-    prefix="/categories",
-    tags=["Business Categories"]
+    simple_business.router,
+    prefix="",
+    tags=["Business (Simple)"]
 )

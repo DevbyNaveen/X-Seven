@@ -13,13 +13,14 @@ from sqlalchemy.orm import Session
 from sqlalchemy import or_
 
 from app.models import Business, MenuItem
-from app.services.ai.modern_conversation_handler import ModernConversationHandler
+from app.services.ai.simple_ai_handler import SimpleAIHandler
 
 
 class UniversalBot:
     def __init__(self, db: Session):
         self.db = db
-        self.conversation = ModernConversationHandler(db)
+        # Use simplified AI handler
+        self.ai = SimpleAIHandler(db)
         # In-memory session store for lightweight state (ok for dev)
         self._sessions: Dict[str, Dict[str, Any]] = {}
         # Disable auto business inference by default to let LLM steer conversation.
@@ -84,15 +85,11 @@ class UniversalBot:
                 session["selected_business"] = inferred
                 session["stage"] = "business_selected"
 
-        # Delegate to conversation handler
-        response = await self.conversation.process_message(
-            session_id=session_id,
+        # Delegate to simplified AI handler (ignore channel/phone for now)
+        response = await self.ai.chat(
             message=message,
-            channel=channel,
+            session_id=session_id,
             context={**ctx, **session},
-            language=language,
-            phone_number=phone_number,
-            location=location,
         )
 
         # Append assistant reply to history for continuity
