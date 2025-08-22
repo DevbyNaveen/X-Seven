@@ -1,0 +1,117 @@
+# Core Framework
+fastapi
+pydantic
+pydantic-settings
+email-validator
+python-multipart
+
+# Database
+sqlalchemy
+alembic
+psycopg2-binary
+
+# Authentication & Security
+python-jose[cryptography]
+passlib==1.7.4
+bcrypt==3.2.0
+python-dotenv
+
+# Async & Background Tasks
+celery
+redis
+
+# HTTP Client
+httpx
+
+# AI & LLM
+openai==1.12.0
+anthropic==0.18.1
+groq==0.4.2
+langchain==0.1.9
+langchain-openai==0.0.5
+langchain-anthropic==0.1.1
+
+# Vector Database
+qdrant-client==1.7.3
+sentence-transformers==2.3.1
+
+# Voice Processing
+elevenlabs==0.2.27
+pydub==0.25.1
+
+# Voice & Communication
+twilio
+
+# Payment Processing
+stripe
+
+# Utilities
+python-dateutil
+pytz
+
+# WebSocket Support
+websockets
+python-socketio
+
+# QR Code Generation
+qrcode[pil]
+pillow
+
+# Real-time Updates
+aioredis
+asyncio-mqtt
+
+# Chat & Messaging
+uuid
+
+# WhatsApp
+heyoo==0.0.8
+
+# NLP & Language
+langdetect==1.0.9
+tiktoken==0.5.2
+
+# Caching
+diskcache==5.6.3
+
+# Additional phone providers
+vonage==3.5.0
+nexmo
+messagebird==2.1.0
+
+# --- Production & Performance Tools ---
+
+# Production Server
+gunicorn==21.2.0
+uvicorn[standard]==0.24.0
+
+# Monitoring & Logging
+sentry-sdk==1.38.0
+prometheus-client==0.19.0
+python-json-logger==2.0.7
+structlog==23.2.0
+
+# Performance
+aiocache==0.12.2
+cachetools==5.3.2
+orjson==3.9.10
+
+# Database Connection Pooling
+asyncpg==0.29.0
+psycopg2-pool==1.1
+
+# Security Headers
+secure==0.3.0
+
+# Rate Limiting
+slowapi==0.1.9
+
+# Health Checks
+py-healthcheck==1.10.1
+
+# Cloud Storage (if needed)
+boto3==1.29.7
+google-cloud-storage==2.10.0
+
+# APM (Application Performance Monitoring)
+ddtrace==2.3.0

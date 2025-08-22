@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>X‑SevenAI Chat</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <div id="app">
+    <header class="app-header">
+      <div class="title">
+        <div class="avatar">🤖</div>
+        <div>
+          <div class="name">X‑SevenAI</div>
+          <div class="sub">WhatsApp‑like Chat</div>
+        </div>
+      </div>
+      <div class="controls">
+        <label class="toggle">
+          <input type="checkbox" id="dedicatedToggle" />
+          <span>Dedicated</span>
+        </label>
+        <input id="businessId" class="biz-input" type="number" placeholder="Business ID" disabled />
+        <button id="connectBtn" class="btn ghost">Connect</button>
+        <span id="statusDot" class="dot off" title="Disconnected"></span>
+      </div>
+    </header>
+
+    <main class="chat">
+      <ul id="messages" class="messages" aria-live="polite"></ul>
+    </main>
+
+    <footer class="composer">
+      <div class="composer-inner">
+        <textarea id="input" rows="1" placeholder="Type a message" autocomplete="off"></textarea>
+        <button id="sendBtn" class="btn primary" aria-label="Send">➤</button>
+      </div>
+      <div id="quickActions" class="actions"></div>
+    </footer>
+  </div>
+  <!-- Markdown + Sanitizer -->
+  <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/dompurify@3.0.9/dist/purify.min.js"></script>
+  <script type="module" src="app.js"></script>
+</body>
+</html>

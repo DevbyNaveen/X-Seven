@@ -1,0 +1,126 @@
+# Core Framework
+fastapi
+pydantic
+pydantic-settings
+email-validator
+python-multipart
+
+# Database
+sqlalchemy
+alembic
+psycopg2-binary
+
+# Authentication & Security
+python-jose[cryptography]
+passlib==1.7.4
+bcrypt==3.2.0
+python-dotenv
+
+# Async & Background Tasks
+celery
+redis
+
+# HTTP Client
+httpx
+
+# AI & LLM
+openai==1.12.0
+anthropic==0.18.1
+groq==0.4.2
+langchain==0.1.9
+langchain-openai==0.0.5
+langchain-anthropic==0.1.1
+
+# Vector Database
+qdrant-client==1.7.3
+sentence-transformers==2.3.1
+
+# Voice Processing
+elevenlabs==0.2.27
+pydub==0.25.1
+
+# Voice & Communication
+twilio
+
+# Payment Processing
+stripe
+
+# Utilities
+python-dateutil
+pytz
+
+# WebSocket Support
+websockets
+python-socketio
+
+# QR Code Generation
+qrcode[pil]
+pillow
+
+# Real-time Updates
+aioredis
+asyncio-mqtt
+
+# Chat & Messaging
+uuid
+
+# WhatsApp
+heyoo==0.0.8
+
+# NLP & Language
+langdetect==1.0.9
+tiktoken==0.5.2
+fuzzywuzzy==0.18.0
+python-Levenshtein==0.23.0
+
+# Caching
+diskcache==5.6.3
+
+# Additional phone providers
+vonage
+nexmo
+messagebird==2.1.0
+
+# --- Development & Testing Tools ---
+
+# Testing
+pytest
+pytest-asyncio
+pytest-cov
+pytest-mock
+pytest-httpx      
+factory-boy
+faker
+
+# Debugging
+ipdb
+pdbpp             
+
+# Code Quality
+black
+flake8
+mypy
+pylint
+isort
+pre-commit
+
+# Documentation
+mkdocs
+mkdocs-material
+
+# Development Server
+uvicorn[standard]
+watchfiles
+
+# Database Tools
+sqlalchemy-utils
+alembic-autogenerate-enums
+
+# Performance Profiling
+py-spy
+memory-profiler
+line-profiler
+
+# Security Testing
+bandit
+safety
