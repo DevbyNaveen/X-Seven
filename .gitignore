@@ -80,7 +80,6 @@ test_*.py
 *_test.py
 
 # Documentation and guides (ignore)
-*.md
 !README.md
 VOICE_CONVERSATION_GUIDE.md
 BACKEND_*.md

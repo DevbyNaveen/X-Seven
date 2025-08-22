@@ -1,8 +1,10 @@
 """
 AI services package.
 
-Exposes the primary conversation handler used by chat endpoints.
+Exposes the modern conversation handler and universal business functions.
 """
-from .conversation_handler import ConversationHandler
+from .modern_conversation_handler import ModernConversationHandler
+from .business_functions import UniversalBusinessFunctions
+from .context_builder import RichContextBuilder
 
-__all__ = ["ConversationHandler"]
+__all__ = ["ModernConversationHandler", "UniversalBusinessFunctions", "RichContextBuilder"]

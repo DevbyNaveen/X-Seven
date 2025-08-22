@@ -1,6 +1,7 @@
 """Background tasks for order processing and scheduling."""
 from typing import Dict, Any, Optional
 from datetime import datetime, timedelta
+import asyncio
 import logging
 from celery import Celery
 from sqlalchemy.orm import Session
@@ -25,6 +26,7 @@ def process_scheduled_order(order_id: int) -> bool:
     """
     try:
         db = next(get_db())
+        notification_service = NotificationService(db)
         order_service = OrderService(db)
         notification_service = NotificationService(db)
         
@@ -44,12 +46,12 @@ def process_scheduled_order(order_id: int) -> bool:
         
         # Send notification to customer
         if order.customer_phone:
-            await notification_service.send_order_confirmation(
+            asyncio.run(notification_service.send_order_confirmation(
                 customer_phone=order.customer_phone,
                 order_id=order.id,
                 business_name=order.business.name,
                 estimated_time=order.estimated_ready_time
-            )
+            ))
         
         logger.info(f"Successfully processed scheduled order {order_id}")
         return True
@@ -83,12 +85,12 @@ def process_delivery_order(order_id: int) -> bool:
         
         # Send delivery notification
         if order.customer_phone:
-            await notification_service.send_delivery_notification(
+            asyncio.run(notification_service.send_delivery_notification(
                 customer_phone=order.customer_phone,
                 order_id=order.id,
                 delivery_address=order.delivery_address,
                 estimated_delivery_time=delivery_info.get("estimated_delivery_time")
-            )
+            ))
         
         logger.info(f"Successfully processed delivery order {order_id}")
         return True
@@ -127,8 +129,13 @@ def update_inventory_after_order(order_id: int) -> bool:
                     
                     # Check if stock is low
                     if menu_item.stock_quantity <= menu_item.min_stock_threshold:
-                        # Send low stock alert
-                        await send_low_stock_alert(menu_item, order.business_id)
+                        # Send low stock alert (run async method safely in sync task)
+                        asyncio.run(notification_service.send_low_stock_alert(
+                            business_id=order.business_id,
+                            item_name=menu_item.name,
+                            current_stock=menu_item.stock_quantity,
+                            threshold=menu_item.min_stock_threshold
+                        ))
         
         db.commit()
         logger.info(f"Successfully updated inventory for order {order_id}")
@@ -156,12 +163,12 @@ def send_low_stock_alert(menu_item: MenuItem, business_id: int) -> bool:
         
         if business:
             # Send alert to business staff
-            await notification_service.send_low_stock_alert(
+            asyncio.run(notification_service.send_low_stock_alert(
                 business_id=business_id,
                 item_name=menu_item.name,
                 current_stock=menu_item.stock_quantity,
                 threshold=menu_item.min_stock_threshold
-            )
+            ))
         
         logger.info(f"Sent low stock alert for {menu_item.name}")
         return True
@@ -223,12 +230,12 @@ def process_waitlist_notifications() -> bool:
         
         for customer in overdue_customers:
             # Send update notification
-            await notification_service.send_waitlist_update(
+            asyncio.run(notification_service.send_waitlist_update(
                 customer_phone=customer.customer_phone,
                 customer_name=customer.customer_name,
                 current_wait_time=customer.wait_duration,
                 estimated_wait_time=customer.estimated_wait_time
-            )
+            ))
             
             # Mark as notified
             customer.is_notified = True

@@ -13,15 +13,18 @@ from sqlalchemy.orm import Session
 from sqlalchemy import or_
 
 from app.models import Business, MenuItem
-from app.services.ai.conversation_handler import ConversationHandler
+from app.services.ai.modern_conversation_handler import ModernConversationHandler
 
 
 class UniversalBot:
     def __init__(self, db: Session):
         self.db = db
-        self.conversation = ConversationHandler(db)
+        self.conversation = ModernConversationHandler(db)
         # In-memory session store for lightweight state (ok for dev)
         self._sessions: Dict[str, Dict[str, Any]] = {}
+        # Disable auto business inference by default to let LLM steer conversation.
+        # Opt-in by setting AUTO_INFER_BUSINESS=true|1|yes|on
+        self._auto_infer_business = str(os.getenv("AUTO_INFER_BUSINESS", "false")).lower() in ("1", "true", "yes", "on")
 
     def _get_session(self, session_id: str) -> Dict[str, Any]:
         return self._sessions.setdefault(session_id, {"stage": "initial", "last_seen_ts": time.time()})
@@ -73,8 +76,9 @@ class UniversalBot:
             # Never fail due to history issues
             session.setdefault("history", [])
 
-        # If no business yet, try to infer from message
-        if not session.get("selected_business"):
+        # Optionally infer from message (default off). When disabled, LLM will
+        # see candidates in context and ask user to confirm selection.
+        if not session.get("selected_business") and self._auto_infer_business:
             inferred = self._infer_business_from_text(message)
             if inferred:
                 session["selected_business"] = inferred

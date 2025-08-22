@@ -5,7 +5,7 @@ from datetime import datetime
 import logging
 from app.models import Business, User, Order
 from app.services.ai.language_service import LanguageService
-from app.services.ai import ConversationHandler
+from app.services.ai import ModernConversationHandler
 from app.schemas.whatsapp import WhatsAppMessage, WhatsAppInteractiveMessage
 
 logger = logging.getLogger(__name__)
@@ -192,8 +192,8 @@ class UniversalWhatsAppService:
                 'message': 'Café not found. Please select again.'
             }
 
-        # Initialize conversation handler for this business
-        conversation_handler = ConversationHandler(self.db)
+        # Initialize modern conversation handler for this business
+        conversation_handler = ModernConversationHandler(self.db)
 
         # Process message with business context
         response = await conversation_handler.process_message(

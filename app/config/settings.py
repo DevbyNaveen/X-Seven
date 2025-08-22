@@ -68,8 +68,17 @@ class Settings(BaseSettings):
     OPENAI_API_KEY: Optional[str] = None
     ANTHROPIC_API_KEY: Optional[str] = None
     GROQ_API_KEY: Optional[str] = None
-    # Preferred Groq model id (e.g., "qwen-3-32b", "gpt-oss-120b")
-    GROQ_MODEL: Optional[str] = None
+    # Preferred Groq model id (default: "llama-3.1-8b-instant").
+    # You can override via environment variable GROQ_MODEL.
+    GROQ_MODEL: Optional[str] = "llama-3.1-8b-instant"
+    # Groq request controls
+    GROQ_MAX_TOKENS: int = 600
+    GROQ_MAX_HISTORY: int = 6
+    GROQ_MIN_HISTORY: int = 3
+    # Safeguard to keep full prompt body under a safe character limit
+    GROQ_MAX_PROMPT_CHARS: int = 12000
+    # Limit the number of businesses included in rich context
+    GROQ_MAX_BUSINESSES: int = 8
 
     # Voice Services
     ELEVENLABS_API_KEY: Optional[str] = None

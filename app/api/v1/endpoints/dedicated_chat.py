@@ -15,16 +15,12 @@ from app.schemas.message import (
     MessageResponse
 )
 from app.services.websocket.connection_manager import manager
-from app.services.ai import ConversationHandler
-from app.services.ai.language_service import LanguageService
+from app.services.ai.modern_conversation_handler import ModernConversationHandler
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
-# Create an instance of the LanguageService
-
-language_service = LanguageService()
 
 @router.post("/message/{business_id}", response_model=ChatResponse)
 async def send_dedicated_message(
@@ -54,40 +50,33 @@ async def send_dedicated_message(
             detail="Cafe not found or inactive"
         )
 
-    # Detect language
-    detected_language_result = language_service.detect_language(request.message)
-    detected_language = detected_language_result.detected_language.value
-
-    # Create universal bot with business context
-    from app.services.ai.universalbot.universal_bot import UniversalBot
-    universal_bot = UniversalBot(db)
-
-    # Process message through AI-driven conversation handler with business context
-    response = await universal_bot.process_message(
+    # Use modern conversation handler with rich context
+    handler = ModernConversationHandler(db)
+    
+    response = await handler.process_message(
         session_id=request.session_id,
         message=request.message,
         channel="dedicated_chat",
         phone_number=request.context.get("phone_number") if request.context else None,
         location=request.context.get("location") if request.context else None,
-        language=detected_language,
         context={
             **request.context,
             "business_id": business_id,
             "business_name": business.name,
             "channel": "dedicated_chat",
-            "selected_business": business_id,
-            "last_message": request.message
+            "selected_business": business_id
         } if request.context else {
             "business_id": business_id,
             "business_name": business.name,
             "channel": "dedicated_chat",
-            "selected_business": business_id,
-            "last_message": request.message
+            "selected_business": business_id
         }
     )
+    
+    clean_message = response["message"]
 
     return ChatResponse(
-        message=response["message"],
+        message=clean_message,
         session_id=request.session_id,
         suggested_actions=response.get("suggested_actions", []),
         metadata={
@@ -135,7 +124,7 @@ async def dedicated_websocket_endpoint(
             table.status = TableStatus.OCCUPIED
             db.commit()
 
-    conversation_handler = ConversationHandler(db)
+    conversation_handler = ModernConversationHandler(db)
 
     try:
         await websocket.send_json({
@@ -151,10 +140,6 @@ async def dedicated_websocket_endpoint(
                 data = await websocket.receive_json()
                 message_text = data.get("message", "")
 
-                # Detect language
-                detected_language_result = language_service.detect_language(message_text)
-                detected_language = detected_language_result.detected_language.value
-
                 response = await conversation_handler.process_message(
                     session_id=session_id,
                     message=message_text,
@@ -165,13 +150,14 @@ async def dedicated_websocket_endpoint(
                         "business_name": business.name,
                         "selected_business": business_id,
                         "table_id": table_id
-                    },
-                    language=detected_language
+                    }
                 )
+
+                final_reply: str = response.get("message", "")
 
                 await websocket.send_json({
                     "type": "message",
-                    "message": response["message"],
+                    "message": final_reply,
                     "suggested_actions": response.get("suggested_actions", []),
                     "metadata": {
                         **response.get("metadata", {}),

@@ -1,9 +1,11 @@
-"""Chat endpoints for customer interactions."""
+"""Chat endpoints for customer interactions with streaming support."""
 from typing import Any, Optional, List
 from fastapi import APIRouter, Depends, HTTPException, status, WebSocket, WebSocketDisconnect
+from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 import uuid
 import asyncio
+import json
 from datetime import datetime, timezone
 import logging
 from app.config.database import SessionLocal, get_db
@@ -16,15 +18,12 @@ from app.schemas.message import (
     MessageResponse
 )
 from app.services.websocket.connection_manager import manager
-from app.services.ai import ConversationHandler
-from app.services.ai.language_service import LanguageService # Import the new service
+from app.services.ai.modern_conversation_handler import ModernConversationHandler
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
-# Create an instance of the LanguageService
-language_service = LanguageService()
 
 @router.post("/message", response_model=ChatResponse)
 async def send_message(
@@ -51,39 +50,32 @@ async def send_message(
             except Exception:
                 business_id = None
 
-        # Detect language before processing
-        detected_language_result = language_service.detect_language(request.message)
-        detected_language = detected_language_result.detected_language.value
-
-        # Create universal bot with business context
-        from app.services.ai.universalbot.universal_bot import UniversalBot
-        universal_bot = UniversalBot(db)
-
-        # Process message through AI-driven conversation handler
-        response = await universal_bot.process_message(
+        # Use modern conversation handler with rich context
+        handler = ModernConversationHandler(db)
+        
+        response = await handler.process_message(
             session_id=request.session_id,
             message=request.message,
             channel="chat",
             phone_number=request.context.get("phone_number") if request.context else None,
             location=request.context.get("location") if request.context else None,
-            language=detected_language,
             context={
                 **request.context,
                 "selected_business": (
                     business_id if business_id is not None 
                     else request.context.get("selected_business")
                 ),
-                "last_message": request.message,
                 "channel": request.channel
             } if request.context else {
                 "selected_business": business_id if business_id is not None else None,
-                "last_message": request.message,
                 "channel": request.channel
             }
         )
+        
+        clean_message = response["message"]
 
         return ChatResponse(
-            message=response["message"],
+            message=clean_message,
             session_id=request.session_id,
             suggested_actions=response.get("suggested_actions", []),
             metadata=response.get("metadata", {})
@@ -98,6 +90,76 @@ async def send_message(
         )
 
 
+@router.post("/stream")
+async def stream_message(
+    request: ChatRequest,
+    db: Session = Depends(get_db)
+):
+    """
+    Stream a response with typewriter effect for better UX.
+    Returns Server-Sent Events (SSE) format.
+    """
+    # Ensure we always have a session_id
+    if not request.session_id:
+        request.session_id = str(uuid.uuid4())
+
+    async def generate_stream():
+        try:
+            business_id = None
+            if request.table_id:
+                try:
+                    table = db.query(Table).filter(Table.id == request.table_id).first()
+                    if table:
+                        business_id = table.business_id
+                except Exception:
+                    business_id = None
+
+            # Use modern conversation handler for streaming
+            handler = ModernConversationHandler(db)
+
+            # Get streaming delay from request or use default
+            delay_ms = request.context.get("typing_delay_ms", 50) if request.context else 50
+
+            # Stream the response
+            async for chunk in handler.stream_response(
+                session_id=request.session_id,
+                message=request.message,
+                channel="http_stream",
+                context={
+                    **request.context,
+                    "selected_business": (
+                        business_id if business_id is not None 
+                        else request.context.get("selected_business")
+                    ),
+                    "channel": request.channel
+                } if request.context else {
+                    "selected_business": business_id if business_id is not None else None,
+                    "channel": request.channel
+                },
+                delay_ms=delay_ms
+            ):
+                # Format as Server-Sent Event
+                yield f"data: {json.dumps(chunk)}\n\n"
+
+        except Exception as e:
+            logger.exception("Error in streaming: %s", e)
+            error_chunk = {
+                "type": "error",
+                "data": {"message": "Sorry, something went wrong. Please try again shortly."}
+            }
+            yield f"data: {json.dumps(error_chunk)}\n\n"
+
+    return StreamingResponse(
+        generate_stream(),
+        media_type="text/plain",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "Content-Type": "text/event-stream",
+        }
+    )
+
+
 @router.websocket("/ws/{session_id}")
 async def websocket_endpoint(
     websocket: WebSocket,
@@ -105,7 +167,7 @@ async def websocket_endpoint(
     table_id: Optional[int] = None,
 ):
     """
-    WebSocket endpoint for real-time chat.
+    WebSocket endpoint for real-time chat with streaming support.
     """
     await manager.connect(websocket, session_id)
 
@@ -120,7 +182,7 @@ async def websocket_endpoint(
             table.status = TableStatus.OCCUPIED
             db.commit()
 
-    conversation_handler = ConversationHandler(db)
+    conversation_handler = ModernConversationHandler(db)
 
     try:
         await websocket.send_json({
@@ -134,56 +196,84 @@ async def websocket_endpoint(
                 data = await websocket.receive_json()
                 message_text = data.get("message", "")
                 stream: bool = bool(data.get("stream", False))
+                typing_delay_ms: int = data.get("typing_delay_ms", 50)
 
-                # Detect language in WebSocket messages
-                detected_language_result = language_service.detect_language(message_text)
-                detected_language = detected_language_result.detected_language.value
+                context = {
+                    **data.get("context", {}),
+                    "selected_business": business_id,
+                    "table_id": table_id
+                }
 
-                # Optionally notify client that assistant is "typing" (no chain-of-thought content)
                 if stream:
+                    # Stream response character by character
                     try:
-                        await websocket.send_json({"type": "typing", "status": "start"})
-                    except Exception:
-                        pass
+                        await websocket.send_json({"type": "typing_start"})
+                        
+                        async for chunk in conversation_handler.stream_response(
+                            session_id=session_id,
+                            message=message_text,
+                            channel="websocket_stream",
+                            context=context,
+                            delay_ms=typing_delay_ms
+                        ):
+                            if chunk["type"] == "chunk":
+                                # Send character-by-character updates
+                                await websocket.send_json({
+                                    "type": "typing_chunk",
+                                    "character": chunk["data"]["character"],
+                                    "position": chunk["data"]["position"],
+                                    "partial_message": chunk["data"]["partial_message"]
+                                })
+                            elif chunk["type"] == "actions":
+                                # Send actions when complete
+                                await websocket.send_json({
+                                    "type": "suggested_actions",
+                                    "data": chunk["data"]
+                                })
+                            elif chunk["type"] == "metadata":
+                                # Send metadata
+                                await websocket.send_json({
+                                    "type": "metadata",
+                                    "data": chunk["data"]
+                                })
+                            elif chunk["type"] == "complete":
+                                # Send completion signal
+                                await websocket.send_json({
+                                    "type": "typing_complete",
+                                    "message": chunk["data"]["message"],
+                                    "suggested_actions": chunk["data"]["suggested_actions"],
+                                    "metadata": chunk["data"]["metadata"]
+                                })
+                                break
+                                
+                    except Exception as stream_error:
+                        logger.exception("Streaming error: %s", stream_error)
+                        await websocket.send_json({
+                            "type": "error",
+                            "message": "Streaming failed, falling back to regular response"
+                        })
+                        # Fall back to regular response
+                        stream = False
 
-                response = await conversation_handler.process_message(
-                    session_id=session_id,
-                    message=message_text,
-                    channel="websocket",
-                    context={
-                        **data.get("context", {}),
-                        "selected_business": business_id,
-                        "table_id": table_id
-                    },
-                    language=detected_language
-                )
+                if not stream:
+                    # Regular non-streaming response
+                    response = await conversation_handler.process_message(
+                        session_id=session_id,
+                        message=message_text,
+                        channel="websocket",
+                        context=context
+                    )
 
-                # Optionally stream the message character-by-character to the client for a typewriter effect
-                final_reply: str = response.get("message", "")
-                if stream and final_reply:
-                    try:
-                        for ch in final_reply:
-                            await websocket.send_json({"type": "token", "delta": ch})
-                            await asyncio.sleep(0.002)  # adjust typing speed
-                    except Exception:
-                        # If streaming fails midway, fall back to sending the full message below
-                        pass
+                    # Send only the final message
+                    final_reply: str = response.get("message", "")
+                    
+                    await websocket.send_json({
+                        "type": "message",
+                        "message": final_reply,
+                        "suggested_actions": response.get("suggested_actions", []),
+                        "metadata": response.get("metadata", {})
+                    })
 
-                final_reply = response.get("message", "") #----------------
-
-                # Stop typing indicator when streaming was enabled
-                if stream:
-                    try:
-                        await websocket.send_json({"type": "typing", "status": "stop"})
-                    except Exception:
-                        pass
-
-                await websocket.send_json({
-                    "type": "message",
-                    "message": final_reply,
-                    "suggested_actions": response.get("suggested_actions", []),
-                    "metadata": response.get("metadata", {})
-                })
             except WebSocketDisconnect:
                 logger.info("WebSocket client disconnected: %s", session_id)
                 break

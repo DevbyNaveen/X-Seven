@@ -41,10 +41,11 @@ app.add_middleware(BusinessContextMiddleware)
 # Configure CORS (updated for WebSocket support)
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=settings.BACKEND_CORS_ORIGINS + settings.WEBSOCKET_ORIGINS,  # Include WebSocket origins
+    allow_origins=["*"],  # Allow all origins in development
     allow_credentials=True,
-    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS", "HEAD"],
     allow_headers=["*"],
+    expose_headers=["*"]
 )
 
 

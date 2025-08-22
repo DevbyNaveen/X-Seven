@@ -1,4 +1,19 @@
-const API_BASE = 'http://localhost:8000/api/v1';
+let API_BASE = (() => {
+  try {
+    const qs = new URLSearchParams(window.location.search);
+    const param = qs.get('api');
+    if (param) {
+      localStorage.setItem('x7_api_base', param);
+    }
+    const saved = localStorage.getItem('x7_api_base');
+    const env = (typeof window !== 'undefined' && (window.API_BASE || window.__API_BASE__)) || saved;
+    if (env) return ('' + env).replace(/\/$/, '');
+    const loc = window.location;
+    return `${loc.protocol}//${loc.host}/api/v1`;
+  } catch {
+    return 'http://localhost:8000/api/v1';
+  }
+})();
 
 const els = {
   messages: document.getElementById('messages'),
@@ -14,6 +29,9 @@ const els = {
 let ws = null;
 let sessionId = getOrCreateSessionId();
 let isDedicated = false;
+let reconnectAttempts = 0;
+let reconnectTimer = null;
+const MAX_RECONNECT_DELAY = 15000;
 
 // Streaming state
 let streamBuffer = "";       // committed/plain text currently shown in the bubble
@@ -23,7 +41,7 @@ let playbackQueue = [];       // incoming characters waiting to be rendered
 let playbackTimer = null;     // current setTimeout handle
 let playing = false;          // whether playback loop is running
 
-init();
+(async () => { await init(); })();
 
 // Configure Markdown rendering if available
 if (window.marked) {
@@ -32,8 +50,19 @@ if (window.marked) {
   } catch {}
 }
 
-function init() {
+async function init() {
   renderSystem('New session: ' + sessionId);
+  // Ensure API base points to a live backend
+  await ensureApiBase();
+  // Restore UI state
+  try {
+    const savedDedicated = localStorage.getItem('x7_dedicated') === '1';
+    isDedicated = savedDedicated;
+    els.dedicatedToggle.checked = savedDedicated;
+    els.businessId.disabled = !savedDedicated;
+    const savedBiz = localStorage.getItem('x7_business_id');
+    if (savedBiz) els.businessId.value = savedBiz;
+  } catch {}
   els.dedicatedToggle.addEventListener('change', onToggleDedicated);
   els.businessId.addEventListener('input', onBizInput);
   els.connectBtn.addEventListener('click', connectWS);
@@ -143,10 +172,11 @@ function finalizeAssistantMessage(finalText, actions) {
 function onToggleDedicated(e) {
   isDedicated = e.target.checked;
   els.businessId.disabled = !isDedicated;
+  try { localStorage.setItem('x7_dedicated', isDedicated ? '1' : '0'); } catch {}
 }
 
 function onBizInput() {
-  // no-op for now
+  try { localStorage.setItem('x7_business_id', els.businessId.value || ''); } catch {}
 }
 
 function getOrCreateSessionId() {
@@ -183,10 +213,13 @@ function connectWS() {
   ws.onopen = () => {
     setConnStatus(true);
     notify('Connected');
+    if (reconnectTimer) { try { clearTimeout(reconnectTimer); } catch {} reconnectTimer = null; }
+    reconnectAttempts = 0;
   };
   ws.onclose = () => {
     setConnStatus(false);
     notify('Disconnected');
+    scheduleReconnect();
   };
   ws.onerror = (err) => {
     console.error('WS error', err);
@@ -202,13 +235,21 @@ function connectWS() {
             renderSystem(data.message || 'Connected');
             break;
           case 'typing':
-            // ignore typing events in UI
+          case 'typing_start':
+          case 'typing_chunk':
+            // streaming disabled in UI; ignore
             break;
-          case 'token':
-            handleCharStream(data.delta || '');
+          case 'typing_complete':
+            finalizeAssistantMessage(data.message || '', data.suggested_actions || []);
             break;
           case 'message':
             finalizeAssistantMessage(data.message || '', data.suggested_actions || []);
+            break;
+          case 'suggested_actions':
+            if (data.data) renderActions(data.data);
+            break;
+          case 'metadata':
+            // no-op in UI for now
             break;
           case 'error':
             renderSystem('Error: ' + (data.message || 'Unknown'));
@@ -221,7 +262,7 @@ function connectWS() {
         }
       } catch {
         // Non-JSON frame -> treat as streamed chunk
-        handleCharStream(raw);
+        // streaming disabled; ignore raw chunks
       }
     })();
   };
@@ -235,6 +276,48 @@ function cleanupWS() {
   setConnStatus(false);
 }
 
+async function ensureApiBase() {
+  const candidates = [];
+  // Current configured base
+  candidates.push(API_BASE);
+  // Common local backends
+  candidates.push('http://localhost:8000/api/v1');
+  candidates.push('http://127.0.0.1:8000/api/v1');
+
+  for (const base of Array.from(new Set(candidates))) {
+    const ok = await pingHealth(base);
+    if (ok) {
+      if (API_BASE !== base) {
+        API_BASE = base;
+        try { localStorage.setItem('x7_api_base', base); } catch {}
+        renderSystem('Using API: ' + base);
+      }
+      return;
+    }
+  }
+  renderSystem('Could not reach API at ' + API_BASE + '. Set ?api=http://localhost:8000/api/v1 and reload.');
+}
+
+async function pingHealth(base) {
+  try {
+    const origin = base.replace(/\/api\/v1$/, '');
+    const res = await fetch(origin + '/health', { method: 'GET' });
+    return res.ok;
+  } catch {
+    return false;
+  }
+}
+
+function scheduleReconnect() {
+  if (reconnectTimer) return;
+  const delay = Math.min(1000 * Math.pow(2, reconnectAttempts), MAX_RECONNECT_DELAY);
+  reconnectAttempts++;
+  reconnectTimer = setTimeout(() => {
+    reconnectTimer = null;
+    connectWS();
+  }, delay);
+}
+
 async function onSend() {
   const text = els.input.value.trim();
   if (!text) return;
@@ -245,7 +328,7 @@ async function onSend() {
   if (ws && ws.readyState === WebSocket.OPEN) {
     const context = {};
     try {
-      ws.send(JSON.stringify({ message: text, context, stream: true }));
+      ws.send(JSON.stringify({ message: text, context, stream: false }));
     } catch (e) {
       console.error('WS send failed, falling back to HTTP', e);
       await sendViaHttp(text);
@@ -275,7 +358,13 @@ async function sendViaHttp(text) {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body),
     });
-    if (!res.ok) throw new Error('HTTP ' + res.status);
+    if (!res.ok) {
+      if (res.status === 413) {
+        renderSystem('The message/context was too large. Please try a shorter message.');
+        return;
+      }
+      throw new Error('HTTP ' + res.status);
+    }
     const data = await res.json();
     renderBot(data.message || '');
     renderActions(data.suggested_actions || []);
@@ -306,7 +395,7 @@ function handleQuickAction(action) {
   // For now, just send the title as text; include action id in context for backend if WS
   const text = action.title;
   renderUser(text);
-  const payload = { message: text, context: { clicked_action: action.id }, stream: true };
+  const payload = { message: text, context: { clicked_action: action.id }, stream: false };
   if (ws && ws.readyState === WebSocket.OPEN) {
     ws.send(JSON.stringify(payload));
   } else {
