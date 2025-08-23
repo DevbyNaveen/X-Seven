@@ -1,21 +1,15 @@
 """Background tasks for order processing and scheduling."""
-from typing import Dict, Any, Optional
 from datetime import datetime, timedelta
 import asyncio
 import logging
-from celery import Celery
-from sqlalchemy.orm import Session
 
-from app.db.session import get_db
-from app.models import Order, MenuItem, Business
+from app.config.database import get_db
+from app.tasks.app import celery_app
+from app.models import Order, MenuItem, OrderStatus
 from app.services.business.order_service import OrderService
 from app.services.notifications.notification_service import NotificationService
 
 logger = logging.getLogger(__name__)
-
-# Initialize Celery
-celery_app = Celery('x-sevenai_tasks')
-celery_app.config_from_object('app.config.celery_config')
 
 
 @celery_app.task
@@ -28,7 +22,6 @@ def process_scheduled_order(order_id: int) -> bool:
         db = next(get_db())
         notification_service = NotificationService(db)
         order_service = OrderService(db)
-        notification_service = NotificationService(db)
         
         # Get the order
         order = db.query(Order).filter(Order.id == order_id).first()
@@ -37,12 +30,16 @@ def process_scheduled_order(order_id: int) -> bool:
             return False
         
         # Check if order is still valid
-        if order.status.value != "pending":
+        if order.status != OrderStatus.PENDING:
             logger.info(f"Order {order_id} is no longer pending, skipping")
             return False
         
-        # Process the order (send to kitchen)
-        order_service.process_scheduled_order(order_id)
+        # Transition order status to confirmed at scheduled time
+        try:
+            asyncio.run(order_service.confirm_order(order_id=order_id, business_id=order.business_id))
+        except Exception as e:
+            logger.error(f"Failed to confirm scheduled order {order_id}: {e}")
+            return False
         
         # Send notification to customer
         if order.customer_phone:
@@ -71,7 +68,6 @@ def process_delivery_order(order_id: int) -> bool:
     """
     try:
         db = next(get_db())
-        order_service = OrderService(db)
         notification_service = NotificationService(db)
         
         # Get the order
@@ -80,16 +76,13 @@ def process_delivery_order(order_id: int) -> bool:
             logger.error(f"Delivery order {order_id} not found")
             return False
         
-        # Process delivery order
-        delivery_info = order_service.process_delivery_order(order_id)
-        
         # Send delivery notification
         if order.customer_phone:
             asyncio.run(notification_service.send_delivery_notification(
                 customer_phone=order.customer_phone,
                 order_id=order.id,
                 delivery_address=order.delivery_address,
-                estimated_delivery_time=delivery_info.get("estimated_delivery_time")
+                estimated_delivery_time=None
             ))
         
         logger.info(f"Successfully processed delivery order {order_id}")
@@ -109,6 +102,7 @@ def update_inventory_after_order(order_id: int) -> bool:
     """
     try:
         db = next(get_db())
+        notification_service = NotificationService(db)
         
         # Get the order
         order = db.query(Order).filter(Order.id == order_id).first()
@@ -149,7 +143,7 @@ def update_inventory_after_order(order_id: int) -> bool:
 
 
 @celery_app.task
-def send_low_stock_alert(menu_item: MenuItem, business_id: int) -> bool:
+def send_low_stock_alert(menu_item_id: int, business_id: int) -> bool:
     """
     Send low stock alert to business staff.
     """
@@ -157,21 +151,20 @@ def send_low_stock_alert(menu_item: MenuItem, business_id: int) -> bool:
         db = next(get_db())
         notification_service = NotificationService(db)
         
-        # Get business info
-        db = next(get_db())
-        business = db.query(Business).filter(Business.id == business_id).first()
-        
-        if business:
-            # Send alert to business staff
+        # Load item and send alert
+        menu_item = db.query(MenuItem).filter(MenuItem.id == menu_item_id).first()
+        if menu_item:
             asyncio.run(notification_service.send_low_stock_alert(
                 business_id=business_id,
                 item_name=menu_item.name,
                 current_stock=menu_item.stock_quantity,
                 threshold=menu_item.min_stock_threshold
             ))
+            logger.info(f"Sent low stock alert for {menu_item.name}")
+            return True
         
-        logger.info(f"Sent low stock alert for {menu_item.name}")
-        return True
+        logger.warning(f"Menu item {menu_item_id} not found for low stock alert")
+        return False
         
     except Exception as e:
         logger.error(f"Error sending low stock alert: {e}")
@@ -191,12 +184,12 @@ def cleanup_expired_orders() -> bool:
         # Find orders that are pending and older than 1 hour
         cutoff_time = datetime.utcnow() - timedelta(hours=1)
         expired_orders = db.query(Order).filter(
-            Order.status == "pending",
+            Order.status == OrderStatus.PENDING,
             Order.created_at < cutoff_time
         ).all()
         
         for order in expired_orders:
-            order.status = "cancelled"
+            order.status = OrderStatus.CANCELLED
             logger.info(f"Cancelled expired order {order.id}")
         
         db.commit()
@@ -281,13 +274,15 @@ def schedule_order_processing(order_id: int, scheduled_time: datetime) -> str:
     
     if delay_seconds <= 0:
         # Process immediately if scheduled time has passed
-        return process_scheduled_order.delay(order_id)
+        result = process_scheduled_order.delay(order_id)
+        return result.id
     else:
         # Schedule for later
-        return process_scheduled_order.apply_async(
+        result = process_scheduled_order.apply_async(
             args=[order_id],
             countdown=int(delay_seconds)
         )
+        return result.id
 
 
 def schedule_delivery_processing(order_id: int, delivery_time: datetime) -> str:
@@ -301,10 +296,12 @@ def schedule_delivery_processing(order_id: int, delivery_time: datetime) -> str:
     
     if delay_seconds <= 0:
         # Process immediately if delivery time has passed
-        return process_delivery_order.delay(order_id)
+        result = process_delivery_order.delay(order_id)
+        return result.id
     else:
         # Schedule for later
-        return process_delivery_order.apply_async(
+        result = process_delivery_order.apply_async(
             args=[order_id],
             countdown=int(delay_seconds)
         )
+        return result.id

@@ -38,7 +38,7 @@ async def chat_message(request: Dict[str, Any], db: Session = Depends(get_db)):
         "message": response.get("message", ""),
         "session_id": session_id,
         "success": response.get("success", True),
-        "metadata": {k: v for k, v in response.items() if k not in {"message", "success", "session_id"}},
+        "suggested_actions": [],
     }
 
 
@@ -106,6 +106,8 @@ async def websocket_chat(websocket: WebSocket, session_id: str, db: Session = De
     })
 
     ai = SimpleAIHandler(db)
+    # Track message IDs to prevent duplicates
+    sent_message_ids = set()
 
     try:
         while True:
@@ -122,31 +124,68 @@ async def websocket_chat(websocket: WebSocket, session_id: str, db: Session = De
             if not user_message:
                 continue
 
-            # Send typing indicator
+            # Send typing indicator only once
             await websocket.send_json({"type": "typing_start"})
 
             # Get full AI response then typewriter it over WebSocket
             try:
                 resp = await ai.chat(user_message, session_id, context)
                 full_message = resp.get("message", "")
-                for i, ch in enumerate(full_message):
-                    await asyncio.sleep(0.015)
-                    await websocket.send_json({
-                        "type": "character",
-                        "character": ch,
-                        "position": i,
-                        "partial_message": full_message[: i + 1],
-                    })
-                await websocket.send_json({
-                    "type": "message_complete",
-                    "full_message": full_message,
-                })
+                message_id = str(uuid.uuid4())
+                print(f"Full AI message for session {session_id} (length {len(full_message)}): {full_message}")
+                
+                # Stream words with error handling
+                try:
+                    print(f"Starting to stream message of length {len(full_message)} for session {session_id}")
+                    words = full_message.split(' ')
+                    streamed_text = ""
+                    
+                    for i, word in enumerate(words):
+                        # Add the word and a space (except for the last word)
+                        streamed_text += word
+                        if i < len(words) - 1:  # Not the last word
+                            streamed_text += " "
+                        
+                        await asyncio.sleep(0.02)  # 20ms delay per word for natural flow
+                        
+                        try:
+                            await websocket.send_json({
+                                "type": "word",
+                                "word": word,
+                                "position": i,
+                                "partial_message": streamed_text,
+                            })
+                        except Exception as e:
+                            print(f"Error streaming word {i}: {str(e)}")
+                            continue
+                    
+                    print(f"Finished streaming message for session {session_id}")
+                    
+                    # Only send typing_complete if we haven't already sent this message
+                    if message_id not in sent_message_ids:
+                        sent_message_ids.add(message_id)
+                        await websocket.send_json({
+                            "type": "typing_complete",
+                            "message": full_message,
+                            "message_id": message_id
+                        })
+                        print(f"Sent typing_complete for session {session_id}")
+                    else:
+                        print(f"Skipping duplicate typing_complete for session {session_id}")
+                    
+                    # Additional logging to ensure completion
+                    print(f"WebSocket streaming fully completed for session {session_id}")
+                except WebSocketDisconnect:
+                    print(f"WebSocket disconnected during message streaming for session {session_id}")
+                    return
+                
             except Exception as e:
                 try:
                     await websocket.send_json({"type": "error", "message": str(e)})
                 except:
                     pass
 
+            # Send typing_end only once after the complete message
             await websocket.send_json({"type": "typing_end"})
 
     except WebSocketDisconnect:

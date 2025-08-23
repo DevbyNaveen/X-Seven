@@ -8,8 +8,8 @@ let API_BASE = (() => {
     const saved = localStorage.getItem('x7_api_base');
     const env = (typeof window !== 'undefined' && (window.API_BASE || window.__API_BASE__)) || saved;
     if (env) return ('' + env).replace(/\/$/, '');
-    const loc = window.location;
-    return `${loc.protocol}//${loc.host}/api/v1`;
+    // Always point to backend server on port 8000
+    return 'http://localhost:8000/api/v1';
   } catch {
     return 'http://localhost:8000/api/v1';
   }
@@ -22,8 +22,6 @@ const els = {
   actions: document.getElementById('quickActions'),
   statusDot: document.getElementById('statusDot'),
   connectBtn: document.getElementById('connectBtn'),
-  dedicatedToggle: document.getElementById('dedicatedToggle'),
-  businessId: document.getElementById('businessId'),
 };
 
 let ws = null;
@@ -37,9 +35,27 @@ const MAX_RECONNECT_DELAY = 15000;
 let streamBuffer = "";       // committed/plain text currently shown in the bubble
 let streamEl = null;          // DOM node of the current streaming bubble
 let streamLi = null;          // parent <li> for adding/removing typing class
-let playbackQueue = [];       // incoming characters waiting to be rendered
+let playbackQueue = [];       // incoming characters/words waiting to be rendered
 let playbackTimer = null;     // current setTimeout handle
 let playing = false;          // whether playback loop is running
+let isTyping = false;         // track typing state to prevent duplicate events
+
+// Set to store received message IDs to prevent duplicates
+const receivedMessageIds = new Set();
+// Map to store message content hashes to prevent content duplicates
+const receivedMessageHashes = new Map();
+
+// Generate a simple hash for message content
+function getMessageHash(content) {
+  if (!content) return '';
+  let hash = 0;
+  for (let i = 0; i < content.length; i++) {
+    const char = content.charCodeAt(i);
+    hash = ((hash << 5) - hash) + char;
+    hash = hash & hash; // Convert to 32bit integer
+  }
+  return hash.toString();
+}
 
 (async () => { await init(); })();
 
@@ -56,15 +72,9 @@ async function init() {
   await ensureApiBase();
   // Restore UI state
   try {
-    const savedDedicated = localStorage.getItem('x7_dedicated') === '1';
-    isDedicated = savedDedicated;
-    els.dedicatedToggle.checked = savedDedicated;
-    els.businessId.disabled = !savedDedicated;
     const savedBiz = localStorage.getItem('x7_business_id');
     if (savedBiz) els.businessId.value = savedBiz;
   } catch {}
-  els.dedicatedToggle.addEventListener('change', onToggleDedicated);
-  els.businessId.addEventListener('input', onBizInput);
   els.connectBtn.addEventListener('click', connectWS);
   els.send.addEventListener('click', onSend);
   els.input.addEventListener('keydown', (e) => {
@@ -80,23 +90,33 @@ async function init() {
 
 // --- Streaming helpers (character-by-character) ---
 function ensureStreamBubble() {
-  if (streamEl) return;
+  if (streamEl) return streamEl;
   const li = document.createElement('li');
-  li.className = 'msg bot';
+  li.className = 'msg bot typing';
   const bubble = document.createElement('div');
   bubble.className = 'bubble';
   bubble.textContent = '';
   li.appendChild(bubble);
-  const ts = document.createElement('div');
-  ts.className = 'timestamp';
-  ts.innerText = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-  li.appendChild(ts);
   els.messages.appendChild(li);
   els.messages.scrollTop = els.messages.scrollHeight;
   streamEl = bubble;
   streamLi = li;
+  return streamEl;
   // show caret while typing
   try { streamLi.classList.add('typing'); } catch {}
+}
+
+function cleanupStreamBubble() {
+  // Clean up any existing stream elements
+  if (playbackTimer) { try { clearTimeout(playbackTimer); } catch {} playbackTimer = null; }
+  playing = false;
+  streamBuffer = '';
+  playbackQueue = [];
+  if (streamEl) {
+    try { if (streamLi) streamLi.classList.remove('typing'); } catch {}
+    streamEl = null;
+    streamLi = null;
+  }
 }
 
 function handleCharStream(chunk) {
@@ -105,6 +125,39 @@ function handleCharStream(chunk) {
   // push incoming characters into playback queue
   for (let i = 0; i < chunk.length; i++) playbackQueue.push(chunk[i]);
   startPlayback();
+}
+
+// --- Word streaming helpers ---
+function handleWordStream(word) {
+  if (word === undefined) return;
+  ensureStreamBubble();
+  // push incoming word into playback queue
+  playbackQueue.push(word);
+  startWordPlayback();
+}
+
+function startWordPlayback() {
+  if (playing) return;
+  playing = true;
+  scheduleNextWordTick();
+}
+
+function scheduleNextWordTick() {
+  if (!streamEl) ensureStreamBubble();
+  if (playbackTimer) { clearTimeout(playbackTimer); playbackTimer = null; }
+  if (playbackQueue.length === 0) {
+    playing = false;
+    return;
+  }
+  const word = playbackQueue.shift();
+  streamBuffer += word;
+  if (streamEl) {
+    streamEl.textContent = streamBuffer;
+    els.messages.scrollTop = els.messages.scrollHeight;
+  }
+  // Add a delay between words for natural flow
+  const delay = 100 + Math.random() * 50; // 100-150ms delay between words
+  playbackTimer = setTimeout(scheduleNextWordTick, delay);
 }
 
 function startPlayback() {
@@ -140,8 +193,76 @@ function delayFor(ch) {
   return 34 + jitter(10, 26);
 }
 
-function finalizeAssistantMessage(finalText, actions) {
-  ensureStreamBubble();
+function finalizeAssistantMessage(finalText, actions, messageId) {
+  // Always create a new message element instead of reusing existing ones
+  cleanupStreamBubble();
+  
+  // Check if we already received this message ID to prevent duplicates
+  if (messageId && receivedMessageIds.has(messageId)) {
+    console.log('Duplicate message ID detected and prevented:', messageId);
+    streamBuffer = '';
+    playbackQueue = [];
+    return;
+  }
+  
+  // Add message ID to the set of received IDs
+  if (messageId) {
+    receivedMessageIds.add(messageId);
+    // Clean up old message IDs to prevent memory leaks
+    if (receivedMessageIds.size > 100) {
+      const first = receivedMessageIds.values().next().value;
+      receivedMessageIds.delete(first);
+    }
+  }
+  
+  // Generate content hash to prevent content duplicates
+  const contentHash = getMessageHash(finalText);
+  if (contentHash && receivedMessageHashes.has(contentHash)) {
+    console.log('Duplicate message content detected and prevented:', contentHash);
+    streamBuffer = '';
+    playbackQueue = [];
+    return;
+  }
+  
+  // Add content hash to prevent future duplicates
+  if (contentHash) {
+    receivedMessageHashes.set(contentHash, Date.now());
+    // Clean up old hashes to prevent memory leaks
+    const now = Date.now();
+    for (const [hash, timestamp] of receivedMessageHashes.entries()) {
+      if (now - timestamp > 300000) { // 5 minutes
+        receivedMessageHashes.delete(hash);
+      }
+    }
+  }
+  
+  // Check if we already have a finalized message with the same content to prevent duplicates
+  const lastMessage = els.messages.lastElementChild;
+  if (lastMessage && lastMessage.classList.contains('bot')) {
+    const lastBubble = lastMessage.querySelector('.bubble');
+    if (lastBubble && lastBubble.textContent === finalText) {
+      // Duplicate message detected, don't create a new one
+      streamBuffer = '';
+      playbackQueue = [];
+      return;
+    }
+  }
+  
+  const li = document.createElement('li');
+  li.className = 'msg bot';
+  const bubble = document.createElement('div');
+  bubble.className = 'bubble';
+  bubble.textContent = '';
+  li.appendChild(bubble);
+  const ts = document.createElement('div');
+  ts.className = 'timestamp';
+  ts.innerText = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  li.appendChild(ts);
+  els.messages.appendChild(li);
+  els.messages.scrollTop = els.messages.scrollHeight;
+  streamEl = bubble;
+  streamLi = li;
+  
   // stop any ongoing playback
   if (playbackTimer) { try { clearTimeout(playbackTimer); } catch {} playbackTimer = null; }
   playing = false;
@@ -169,12 +290,6 @@ function finalizeAssistantMessage(finalText, actions) {
   }
 }
 
-function onToggleDedicated(e) {
-  isDedicated = e.target.checked;
-  els.businessId.disabled = !isDedicated;
-  try { localStorage.setItem('x7_dedicated', isDedicated ? '1' : '0'); } catch {}
-}
-
 function onBizInput() {
   try { localStorage.setItem('x7_business_id', els.businessId.value || ''); } catch {}
 }
@@ -196,16 +311,8 @@ function connectWS() {
   const origin = `${wsScheme}://${url.host}`;
 
   let path;
-  if (isDedicated) {
-    const biz = parseInt(els.businessId.value, 10);
-    if (!biz) {
-      notify('Enter a Business ID for dedicated chat');
-      return;
-    }
-    path = `/api/v1/dedicated-chat/ws/${biz}/${sessionId}`;
-  } else {
-    path = `/api/v1/chat/ws/${sessionId}`;
-  }
+  // Use the correct WebSocket endpoint (dedicated chat endpoint doesn't exist)
+  path = `/api/v1/chat/ws/${sessionId}`;
 
   const wsUrl = origin + path;
   ws = new WebSocket(wsUrl);
@@ -217,12 +324,13 @@ function connectWS() {
     reconnectAttempts = 0;
   };
   ws.onclose = () => {
+    console.log('WebSocket connection closed');
     setConnStatus(false);
     notify('Disconnected');
     scheduleReconnect();
   };
   ws.onerror = (err) => {
-    console.error('WS error', err);
+    console.error('WebSocket error', err);
     notify('WebSocket error');
   };
   ws.onmessage = (evt) => {
@@ -230,31 +338,82 @@ function connectWS() {
       const raw = typeof evt.data === 'string' ? evt.data : await evt.data.text();
       try {
         const data = JSON.parse(raw);
+        console.log('Received WebSocket message:', data.type, data);
         switch (data.type) {
           case 'connected':
-            renderSystem(data.message || 'Connected');
+            renderSystem(data.message || 'Connected to X-SevenAI! How can I help you today?');
             break;
           case 'typing':
           case 'typing_start':
-          case 'typing_chunk':
-            // streaming disabled in UI; ignore
+            // Start typing indicator only if not already typing
+            if (!isTyping) {
+              isTyping = true;
+              // Ensure we have a stream bubble for typing indicator
+              ensureStreamBubble();
+              console.log('Started typing indicator');
+            }
+            break;
+          case 'character':
+            // Handle character-by-character streaming
+            if (data.character) {
+              handleCharStream(data.character);
+            }
+            break;
+          case 'word':
+            // Handle word-by-word streaming
+            if (data.word !== undefined) {
+              handleWordStream(data.word);
+            }
             break;
           case 'typing_complete':
-            finalizeAssistantMessage(data.message || '', data.suggested_actions || []);
+            console.log('Received typing_complete message:', data.message);
+            // Finalize the message only if we've been streaming characters/words
+            // and ensure we don't create duplicate messages
+            if ((streamEl || playbackQueue.length > 0) && !streamEl?.parentElement?.classList?.contains('finalized')) {
+              console.log('Finalizing assistant message:', data.message);
+              finalizeAssistantMessage(data.message || data.partial_message || '', data.suggested_actions || [], data.message_id);
+              // Mark the message as finalized to prevent duplicates
+              if (streamEl && streamEl.parentElement) {
+                streamEl.parentElement.classList.add('finalized');
+              }
+            } else {
+              console.log('Skipping duplicate or unnecessary typing_complete message');
+            }
             break;
           case 'message':
-            finalizeAssistantMessage(data.message || '', data.suggested_actions || []);
+            // Create a new message bubble for each message
+            cleanupStreamBubble();
+            renderBot(data.message || '');
+            if (data.suggested_actions && Array.isArray(data.suggested_actions)) {
+              renderActions(data.suggested_actions);
+            }
             break;
           case 'suggested_actions':
             if (data.data) renderActions(data.data);
+            break;
+          case 'typing_end':
+            // End of typing indicator - clean up streaming state
+            console.log('Received typing_end message');
+            // Reset typing state
+            isTyping = false;
+            // Ensure any remaining content is finalized
+            if (streamEl || playbackQueue.length > 0) {
+              const finalText = streamBuffer + playbackQueue.join(' ');
+              if (finalText.trim()) {
+                finalizeAssistantMessage(finalText, [], null);
+              }
+              cleanupStreamBubble();
+            }
             break;
           case 'metadata':
             // no-op in UI for now
             break;
           case 'error':
-            renderSystem('Error: ' + (data.message || 'Unknown'));
+            console.error('Backend error:', data.message);
+            renderSystem('Error: ' + data.message);
             break;
           default:
+            console.warn('Unknown message type:', data.type, data);
             if (data.message) {
               finalizeAssistantMessage(data.message, data.suggested_actions || []);
             }
@@ -340,18 +499,9 @@ async function onSend() {
 
 async function sendViaHttp(text) {
   try {
-    let url = `${API_BASE}/chat/message`;
-    let body = { message: text, session_id: sessionId, context: { channel: 'web' } };
-
-    if (isDedicated) {
-      const biz = parseInt(els.businessId.value, 10);
-      if (!biz) {
-        notify('Enter a Business ID for dedicated chat');
-        return;
-      }
-      url = `${API_BASE}/dedicated-chat/message/${biz}`;
-      body = { message: text, session_id: sessionId, context: { channel: 'dedicated_web', selected_business: biz } };
-    }
+    // Use only the regular chat endpoint - let AI handle everything
+    const url = `${API_BASE}/chat/message`;
+    const body = { message: text, session_id: sessionId, context: { channel: 'web' } };
 
     const res = await fetch(url, {
       method: 'POST',
