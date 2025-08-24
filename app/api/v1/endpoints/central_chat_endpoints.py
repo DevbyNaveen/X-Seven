@@ -161,23 +161,25 @@ async def stream_global_chat(
                 
                 await asyncio.sleep(0.05)  # 50ms delay per word
                 
-                yield f"data: {json.dumps({
-                    'type': 'word',
-                    'word': word,
-                    'position': i,
-                    'partial_message': streamed_text
-                })}\n\n"
+                data_chunk = {
+                    "type": "word",
+                    "word": word,
+                    "position": i,
+                    "partial_message": streamed_text,
+                }
+                yield "data: " + json.dumps(data_chunk) + "\n\n"
             
             # Send completion
-            yield f"data: {json.dumps({
-                'type': 'complete',
-                'message': full_message,
-                'chat_type': 'global'
-            })}\n\n"
+            complete_chunk = {
+                "type": "complete",
+                "message": full_message,
+                "chat_type": "global",
+            }
+            yield "data: " + json.dumps(complete_chunk) + "\n\n"
             
         except Exception as e:
             error_chunk = {"type": "error", "message": str(e)}
-            yield f"data: {json.dumps(error_chunk)}\n\n"
+            yield "data: " + json.dumps(error_chunk) + "\n\n"
     
     return StreamingResponse(
         generate_stream(),
