@@ -8,25 +8,6 @@ from app.api.v1.endpoints import (
     orders,
     # Replaced complex chat with simple chat endpoints
     simple_chat_endpoints as simple_chat,
-    # Keep universal and others
-    universal,    # NEW
-    # Replaced dedicated_chat with simple chat as well
-    dashboard,    # NEW
-    kitchen,      # NEW
-    onboarding,
-    voice,    # NEW
-    analytics,    # NEW
-    plans,    # NEW
-    customers,    # NEW - Customer management
-    billing,      # NEW - Subscription billing
-    notifications, # NEW - Real-time notifications
-    qr_codes,     # NEW - QR code generation
-    voice_calls,  # NEW - Voice call system
-    bookings,     # NEW - Booking system
-    waitlist,     # NEW - Waitlist management
-    inventory,    # NEW - Inventory management
-    # Add simple business endpoints
-    simple_business_endpoints as simple_business,
 )
 
 # Create main router
