@@ -20,7 +20,7 @@ class Message(BaseModel):
     business_id = Column(
         Integer,
         ForeignKey("businesses.id", ondelete="CASCADE"),
-        nullable=False,
+        nullable=True,
         index=True
     )
     

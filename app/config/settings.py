@@ -70,7 +70,7 @@ class Settings(BaseSettings):
     GROQ_API_KEY: Optional[str] = None
     # Preferred Groq model id (default: "llama-3.1-8b-instant").
     # You can override via environment variable GROQ_MODEL.
-    GROQ_MODEL: Optional[str] = "llama-3.1-8b-instant"
+    GROQ_MODEL: Optional[str] = "llama-3.3-70b-versatile"
     # Groq request controls
     GROQ_MAX_TOKENS: int = 600
     GROQ_MAX_HISTORY: int = 6

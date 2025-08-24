@@ -1,61 +1,54 @@
-# app/services/ai/central_ai_handler.py
+# app/services/ai/simple_central_ai_handler.py
 """
-Enhanced Central AI Handler - The single brain for all chat types
-Handles: Global Chat, Dedicated Chat, and Dashboard Chat
+Simple Central AI Handler - Let AI understand and act naturally
 """
 from __future__ import annotations
 
 import json
-import re
+import asyncio
 from datetime import datetime
-from typing import Dict, Any, Optional, List, Set
+from typing import Dict, Any, Optional, List
 from enum import Enum
+from dataclasses import dataclass
+import re
+import logging
 
 from sqlalchemy.orm import Session
+from groq import Groq
 
-try:
-    from groq import Groq  # type: ignore
-except Exception:
-    Groq = None  # type: ignore
-
-from app.models import Business, MenuItem, Message, Order, Table
+from app.models import Business, MenuItem, Message
 from app.config.settings import settings
-
-# Session context store (in production, use Redis)
-_SESSION_CONTEXTS: Dict[str, Dict[str, Any]] = {}
 
 
 class ChatType(str, Enum):
-    """Types of chat interactions."""
-    GLOBAL = "global"           # Discovery across all businesses
-    DEDICATED = "dedicated"     # Customer chat for specific business
-    DASHBOARD = "dashboard"     # Business owner/staff management
+    GLOBAL = "global"
+    DEDICATED = "dedicated"
+    DASHBOARD = "dashboard"
+
+
+@dataclass
+class UnifiedContext:
+    chat_type: ChatType
+    session_id: str
+    user_message: str
+    business_id: Optional[int] = None
+    all_businesses: List[Dict] = None
+    current_business: Optional[Dict] = None
+    business_menu: List[Dict] = None
+    conversation_history: List[str] = None
+    current_time: datetime = None
 
 
 class CentralAIHandler:
     """
-    Central AI Handler - Single brain for all chat interactions.
-    
-    Features:
-    - Handles all three chat types with context switching
-    - Maintains conversation memory across sessions  
-    - Integrates with business operations (orders, bookings, inventory)
-    - Supports voice, text, and dashboard interactions
+    Simple AI Handler - Let AI understand and respond naturally
     """
 
     def __init__(self, db: Session):
         self.db = db
-        self.model = settings.GROQ_MODEL or "llama-3.1-8b-instant"
-        self.max_tokens = getattr(settings, "GROQ_MAX_TOKENS", 1200) or 1200
-        self.max_history = getattr(settings, "GROQ_MAX_HISTORY", 6) or 6
-        
-        # Initialize Groq client
-        self.client = None
-        if settings.GROQ_API_KEY and Groq is not None:
-            try:
-                self.client = Groq(api_key=settings.GROQ_API_KEY)
-            except Exception:
-                self.client = None
+        self.client = Groq(api_key=settings.GROQ_API_KEY) if settings.GROQ_API_KEY else None
+        self.model = settings.GROQ_MODEL or "llama-3.3-70b-versatile"
+        self.logger = logging.getLogger(__name__)
 
     async def chat(
         self,
@@ -65,575 +58,320 @@ class CentralAIHandler:
         context: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         """
-        Main chat method - routes to appropriate handler based on chat type.
-        
-        Args:
-            message: User's message
-            session_id: Session identifier
-            chat_type: Type of chat (global, dedicated, dashboard)
-            context: Additional context (business_id, user_role, etc.)
-            
-        Returns:
-            Response with message and metadata
+        Main chat method - Let AI work naturally
         """
-        context = context or {}
-        
-        # Route to appropriate handler based on chat type
-        if chat_type == ChatType.GLOBAL:
-            return await self._handle_global_chat(message, session_id, context)
-        elif chat_type == ChatType.DEDICATED:
-            return await self._handle_dedicated_chat(message, session_id, context)
-        elif chat_type == ChatType.DASHBOARD:
-            return await self._handle_dashboard_chat(message, session_id, context)
-        else:
-            return {"message": "Invalid chat type", "success": False}
-
-    async def _handle_global_chat(
-        self, 
-        message: str, 
-        session_id: str, 
-        context: Dict[str, Any]
-    ) -> Dict[str, Any]:
-        """Handle global discovery chat across all businesses."""
-        
-        # Get all active businesses
-        businesses = self.db.query(Business).filter(Business.is_active == True).all()
-        
-        if not businesses:
-            return {
-                "message": "No businesses are currently available.",
-                "success": True,
-                "chat_type": "global"
-            }
-        
-        # Build business context (limit for performance)
-        max_biz = 8
-        business_list = []
-        
-        for biz in businesses[:max_biz]:
-            # Get sample menu items
-            items = (
-                self.db.query(MenuItem)
-                .filter(MenuItem.business_id == biz.id, MenuItem.is_available == True)
-                .limit(3)
-                .all()
+        try:
+            # Build context with real data
+            unified_context = await self._build_context(
+                message=message,
+                session_id=session_id,
+                chat_type=chat_type,
+                business_id=context.get("business_id") if context else None
             )
             
-            business_list.append({
-                "id": biz.id,
-                "name": biz.name,
-                "category": str(biz.category) if biz.category else None,
-                "description": biz.description,
-                "sample_menu": [
-                    {"name": item.name, "price": float(item.base_price or 0)}
-                    for item in items
-                ]
-            })
-        
-        # Build conversation history
-        history = self._get_conversation_history(session_id)
-        session_context = self._get_session_context(session_id)
-        
-        # Extract customer info
-        extracted_info = self._extract_customer_info(message)
-        if extracted_info:
-            self._update_session_context(session_id, extracted_info)
-            session_context = self._get_session_context(session_id)
-        
-        # Create global discovery prompt
-        prompt = f"""You are X-SevenAI, helping users discover and interact with local businesses.
+            # Generate AI response
+            prompt = await self._create_simple_prompt(unified_context)
+            ai_response = await self._get_ai_response(prompt)
+            final_response = await self._clean_response(ai_response)
+            
+            # Save conversation
+            await self._save_conversation(unified_context, final_response)
+            
+            return {
+                "message": final_response,
+                "success": True,
+                "chat_type": chat_type.value
+            }
+            
+        except Exception as e:
+            return {
+                "message": "I'm having trouble right now. Please try again in a moment.",
+                "success": False,
+                "error": str(e)
+            }
 
-AVAILABLE BUSINESSES:
-{json.dumps(business_list, separators=(',', ':'))}
-
-CONVERSATION HISTORY:
-{chr(10).join(history[-self.max_history:])}
-
-CURRENT USER MESSAGE: {message}
-
-{self._get_customer_context_text(session_context)}
-
-GLOBAL DISCOVERY GUIDELINES:
-- Help users find businesses that match their needs
-- Provide recommendations based on cuisine, location, or preferences  
-- When user shows interest in a specific business, provide more details
-- For orders/bookings, guide them to contact the business directly
-- Be conversational and helpful, not robotic
-- Ask clarifying questions if needed
-- Don't overwhelm with all business info unless requested
-
-Response:"""
-
-        return await self._generate_ai_response(
-            prompt, session_id, message, ChatType.GLOBAL, context
-        )
-
-    async def _handle_dedicated_chat(
-        self, 
-        message: str, 
-        session_id: str, 
-        context: Dict[str, Any]
-    ) -> Dict[str, Any]:
-        """Handle dedicated chat for a specific business."""
-        
-        business_id = context.get("business_id") or context.get("selected_business")
-        if not business_id:
-            return {"message": "Business not specified for dedicated chat", "success": False}
-        
-        # Get specific business
-        business = self.db.query(Business).filter(Business.id == business_id).first()
-        if not business:
-            return {"message": "Business not found", "success": False}
-        
-        # Get full menu for this business
-        menu_items = (
-            self.db.query(MenuItem)
-            .filter(MenuItem.business_id == business_id, MenuItem.is_available == True)
-            .limit(15)  # More items for dedicated chat
-            .all()
+    async def _build_context(
+        self,
+        message: str,
+        session_id: str,
+        chat_type: ChatType,
+        business_id: Optional[int]
+    ) -> UnifiedContext:
+        """Build context with real data"""
+        context = UnifiedContext(
+            chat_type=chat_type,
+            session_id=session_id,
+            user_message=message,
+            current_time=datetime.now(),
+            business_id=business_id
         )
         
-        # Get table info if applicable
-        table_info = ""
-        table_id = context.get("table_id")
-        if table_id:
-            table = self.db.query(Table).filter(Table.id == table_id).first()
-            if table:
-                table_info = f"TABLE: {table.table_number}\n"
+        # Load conversation history (isolate by chat type and business)
+        context.conversation_history = await self._load_history(
+            session_id=session_id,
+            chat_type=chat_type,
+            business_id=business_id,
+        )
         
-        # Build business context
-        business_context = {
-            "id": business.id,
-            "name": business.name,
-            "category": str(business.category) if business.category else None,
-            "description": business.description,
-            "menu": [
+        # Load business data
+        if chat_type == ChatType.GLOBAL:
+            context.all_businesses = await self._load_businesses()
+        elif chat_type in (ChatType.DEDICATED, ChatType.DASHBOARD) and business_id:
+            context.current_business = await self._load_business(business_id)
+            context.business_menu = await self._load_menu(business_id)
+        
+        return context
+
+    async def _create_simple_prompt(self, context: UnifiedContext) -> str:
+        """Create simple prompt - let AI understand naturally"""
+        base = f"""You are X-SevenAI, a helpful business assistant.
+Current time: {context.current_time.strftime('%Y-%m-%d %H:%M')}
+
+"""
+        
+        if context.chat_type == ChatType.GLOBAL:
+            return self._create_global_simple_prompt(base, context)
+        elif context.chat_type == ChatType.DEDICATED:
+            return self._create_dedicated_simple_prompt(base, context)
+        elif context.chat_type == ChatType.DASHBOARD:
+            return self._create_dashboard_simple_prompt(base, context)
+        
+        return base + f"User: {context.user_message}\nAssistant:"
+
+    def _create_global_simple_prompt(self, base: str, context: UnifiedContext) -> str:
+        """Simple global prompt"""
+        lines = [base.strip()]
+        
+        # Add real business data
+        if context.all_businesses:
+            lines.append("## Available Businesses")
+            business_list = []
+            for b in context.all_businesses[:15]:
+                menu_items = []
+                if b.get('sample_menu'):
+                    for item in b['sample_menu'][:2]:
+                        menu_items.append(f"{item['name']} (${item['price']})")
+                menu_str = ", ".join(menu_items) if menu_items else "Various services"
+                business_list.append(f"• **{b['name']}**: {b.get('description', 'Business services')} | {menu_str}")
+            lines.append("\n".join(business_list))
+        
+        # Add conversation history
+        if context.conversation_history:
+            lines.append("\n## Conversation")
+            for entry in context.conversation_history[-12:]:
+                lines.append(f"- {entry}")
+        
+        lines.append(f"\n## User Request\n{context.user_message}")
+        lines.append("\n## Your Response")
+        lines.append("Respond naturally and helpfully:")
+        lines.append("- Use **bold** for business names")
+        lines.append("- Use bullet points for lists")
+        lines.append("- Be conversational and friendly")
+        lines.append("- ONLY mention businesses from the list above")
+        lines.append("- Let the user guide the conversation")
+        lines.append("- Handle reservations, orders, and invoices naturally")
+        lines.append("- No need to mention switching or routing")
+        
+        return "\n".join(lines)
+
+    def _create_dashboard_simple_prompt(self, base: str, context: UnifiedContext) -> str:
+        """Simple dashboard prompt for business owners/managers"""
+        lines = [base.strip()]
+        
+        if context.current_business:
+            lines.append(f"## Managing: {context.current_business['name']}")
+            lines.append(f"**Category**: {context.current_business.get('category', 'General')}")
+        
+        lines.append("\n## Conversation (recent)")
+        if context.conversation_history:
+            for entry in context.conversation_history[-12:]:
+                lines.append(f"- {entry}")
+        
+        lines.append(f"\n## Request\n{context.user_message}")
+        lines.append("\n## Your Response")
+        lines.append("You are assisting the business owner with management tasks:")
+        lines.append("- Be concise and action-oriented")
+        lines.append("- Use bullet points when listing steps")
+        lines.append("- If data is needed, ask for it clearly")
+        
+        return "\n".join(lines)
+
+    def _create_dedicated_simple_prompt(self, base: str, context: UnifiedContext) -> str:
+        """Simple dedicated prompt"""
+        lines = [base.strip()]
+        
+        # Add business context
+        if context.current_business:
+            lines.append(f"## Business: {context.current_business['name']}")
+            lines.append(f"**Category**: {context.current_business.get('category', 'General')}")
+            lines.append(f"**About**: {context.current_business.get('description', 'Business services')}")
+        
+        # Add menu
+        if context.business_menu:
+            lines.append("\n## Services")
+            menu_items = []
+            for item in context.business_menu[:12]:
+                menu_items.append(f"• **{item['name']}** - ${item['price']} ({item.get('description', 'Service')})")
+            lines.append("\n".join(menu_items))
+        
+        # Add conversation history
+        if context.conversation_history:
+            lines.append("\n## Conversation")
+            for entry in context.conversation_history[-12:]:
+                lines.append(f"- {entry}")
+        
+        lines.append(f"\n## Customer Message\n{context.user_message}")
+        lines.append("\n## Your Response")
+        lines.append("You represent this business. Respond naturally:")
+        lines.append("- Be helpful about services and bookings")
+        lines.append("- Use friendly, professional tone")
+        lines.append("- Use **bold** for key terms")
+        lines.append("- Handle reservations, orders, and invoices naturally")
+        lines.append("- Collect customer information conversationally")
+        lines.append("- No need to mention switching or routing")
+        
+        return "\n".join(lines)
+
+    async def _load_history(self, session_id: str, chat_type: ChatType, business_id: Optional[int]) -> List[str]:
+        """Load conversation history, scoped appropriately to avoid cross-contamination"""
+        query = self.db.query(Message).filter(Message.session_id == session_id)
+        # For global chats, only include messages without business context
+        if chat_type == ChatType.GLOBAL:
+            query = query.filter(Message.business_id.is_(None))
+        # For dedicated/dashboard chats, restrict to the specific business
+        elif chat_type in (ChatType.DEDICATED, ChatType.DASHBOARD):
+            if business_id is not None:
+                query = query.filter(Message.business_id == business_id)
+            else:
+                # No business specified -> return empty history for safety
+                return []
+        messages = (
+            query.order_by(Message.created_at.desc()).limit(50).all()
+        )
+        history = []
+        for msg in reversed(messages):
+            sender = "User" if msg.sender_type == "customer" else "Assistant"
+            history.append(f"{sender}: {msg.content}")
+        return history
+
+    async def _load_businesses(self) -> List[Dict]:
+        """Load active businesses"""
+        businesses = self.db.query(Business).filter(Business.is_active == True).limit(20).all()
+        
+        return [{
+            "id": biz.id,
+            "name": biz.name,
+            "category": biz.category,
+            "description": biz.description,
+            "sample_menu": [
                 {
-                    "id": item.id,
                     "name": item.name,
                     "description": item.description,
                     "price": float(item.base_price or 0)
-                }
-                for item in menu_items
+                } for item in self.db.query(MenuItem).filter(
+                    MenuItem.business_id == biz.id,
+                    MenuItem.is_available == True
+                ).limit(3).all()
             ]
-        }
-        
-        # Get conversation history and session context
-        history = self._get_conversation_history(session_id)
-        session_context = self._get_session_context(session_id)
-        
-        # Extract customer info
-        extracted_info = self._extract_customer_info(message)
-        if extracted_info:
-            self._update_session_context(session_id, extracted_info)
-            session_context = self._get_session_context(session_id)
-        
-        # Create dedicated business prompt
-        prompt = f"""You are X-SevenAI assistant for {business.name}.
+        } for biz in businesses]
 
-BUSINESS DETAILS:
-{json.dumps(business_context, separators=(',', ':'))}
-
-{table_info}CONVERSATION HISTORY:
-{chr(10).join(history[-self.max_history:])}
-
-CURRENT USER MESSAGE: {message}
-
-{self._get_customer_context_text(session_context)}
-
-DEDICATED BUSINESS GUIDELINES:
-- You represent {business.name} specifically
-- Help customers with menu questions, orders, and bookings
-- Provide detailed information about menu items and prices
-- For orders: collect items, quantities, and customer details (name required, phone optional)
-- For bookings: collect date, time, party size, and customer details
-- After getting customer details, format orders as: ORDER: {business_id}|items|customer_name|customer_phone
-- After getting customer details, format bookings as: BOOKING: {business_id}|name|phone|date|time|party_size
-- Be friendly and knowledgeable about {business.name}
-- Upsell appropriately but not aggressively
-
-Response:"""
-
-        return await self._generate_ai_response(
-            prompt, session_id, message, ChatType.DEDICATED, context, business_id
-        )
-
-    async def _handle_dashboard_chat(
-        self, 
-        message: str, 
-        session_id: str, 
-        context: Dict[str, Any]
-    ) -> Dict[str, Any]:
-        """Handle dashboard management chat for business owners/staff."""
-        
-        business_id = context.get("business_id")
-        if not business_id:
-            return {"message": "Business access required for dashboard", "success": False}
-        
-        # Get business details
+    async def _load_business(self, business_id: int) -> Optional[Dict]:
+        """Load specific business"""
         business = self.db.query(Business).filter(Business.id == business_id).first()
         if not business:
-            return {"message": "Business not found", "success": False}
-        
-        # Get business data for management
-        menu_items = self.db.query(MenuItem).filter(MenuItem.business_id == business_id).all()
-        recent_orders = (
-            self.db.query(Order)
-            .filter(Order.business_id == business_id)
-            .order_by(Order.created_at.desc())
-            .limit(10)
-            .all()
-        )
-        
-        # Build management context
-        management_context = {
-            "business": {
-                "id": business.id,
-                "name": business.name,
-                "status": "active" if business.is_active else "inactive"
-            },
-            "menu_stats": {
-                "total_items": len(menu_items),
-                "available_items": len([item for item in menu_items if item.is_available]),
-                "low_stock_items": len([item for item in menu_items if getattr(item, 'stock_quantity', 0) <= getattr(item, 'min_stock_threshold', 5)])
-            },
-            "order_stats": {
-                "recent_orders": len(recent_orders),
-                "pending_orders": len([order for order in recent_orders if order.status.value == "pending"])
-            }
+            return None
+        return {
+            "id": business.id,
+            "name": business.name,
+            "category": business.category,
+            "description": business.description,
+            "is_active": business.is_active
         }
+
+    async def _load_menu(self, business_id: int) -> List[Dict]:
+        """Load business menu"""
+        menu_items = self.db.query(MenuItem).filter(
+            MenuItem.business_id == business_id,
+            MenuItem.is_available == True
+        ).all()
         
-        # Get conversation history
-        history = self._get_conversation_history(session_id)
-        
-        # Create dashboard management prompt
-        prompt = f"""You are the AI management assistant for {business.name}.
+        return [{
+            "id": item.id,
+            "name": item.name,
+            "description": item.description,
+            "price": float(item.base_price or 0),
+            "category": item.category_id,
+            "available": item.is_available
+        } for item in menu_items]
 
-BUSINESS MANAGEMENT CONTEXT:
-{json.dumps(management_context, separators=(',', ':'))}
-
-CONVERSATION HISTORY:
-{chr(10).join(history[-self.max_history:])}
-
-CURRENT MANAGEMENT REQUEST: {message}
-
-DASHBOARD ASSISTANT GUIDELINES:
-- You help manage {business.name} operations
-- Provide insights on inventory, orders, staff, and analytics
-- Answer questions about business performance and status
-- Suggest improvements and optimizations
-- Help with menu management, pricing, and operations
-- For inventory alerts: "INVENTORY_ALERT: item_name|current_stock|threshold"
-- For order updates: "ORDER_UPDATE: order_id|new_status|notes"
-- Be professional, data-driven, and actionable
-- Focus on business efficiency and growth
-
-AVAILABLE MANAGEMENT FUNCTIONS:
-- Check inventory status and alerts
-- Review order status and analytics  
-- Monitor business performance metrics
-- Manage menu items and pricing
-- Staff scheduling and task management
-- Customer analytics and feedback
-
-Response:"""
-
-        return await self._generate_ai_response(
-            prompt, session_id, message, ChatType.DASHBOARD, context, business_id
-        )
-
-    async def _generate_ai_response(
-        self,
-        prompt: str,
-        session_id: str,
-        message: str,
-        chat_type: ChatType,
-        context: Dict[str, Any],
-        business_id: Optional[int] = None
-    ) -> Dict[str, Any]:
-        """Generate AI response using Groq."""
-        
+    async def _get_ai_response(self, prompt: str) -> str:
+        """Get AI response"""
         if not self.client:
-            fallback_msg = "AI is not configured. Please set GROQ_API_KEY to enable intelligent responses."
-            await self._save_messages(business_id or 0, session_id, message, fallback_msg)
-            return {"message": fallback_msg, "success": True, "chat_type": chat_type.value}
+            return "AI service unavailable. Please try again later."
         
         try:
             response = self.client.chat.completions.create(
                 model=self.model,
-                messages=[{"role": "user", "content": prompt}],
-                temperature=0.7,
-                max_tokens=self.max_tokens,
-                timeout=90,
+                messages=[
+                    {"role": "system", "content": """You are X-SevenAI, a helpful business assistant.
+Let the conversation flow naturally.
+Use proper spacing and punctuation.
+Use markdown formatting for clarity.
+Handle reservations, orders, and invoices naturally.
+Let the user guide the conversation.
+No need to mention switching or routing - just respond naturally."""},
+                    {"role": "user", "content": prompt}
+                ],
+                max_tokens=1000,
+                temperature=0.7
             )
-            
-            ai_response = response.choices[0].message.content if response.choices[0].message.content else ""
-            
-            # Handle special actions based on chat type
-            if chat_type == ChatType.DEDICATED:
-                ai_response = await self._handle_dedicated_actions(ai_response, session_id, business_id)
-            elif chat_type == ChatType.DASHBOARD:
-                ai_response = await self._handle_dashboard_actions(ai_response, business_id)
-            
-            # Clean response
-            ai_response = self._clean_response(ai_response)
-            
-            # Save conversation
-            await self._save_messages(business_id or 0, session_id, message, ai_response)
-            
-            return {
-                "message": ai_response,
-                "success": True,
-                "chat_type": chat_type.value,
-                "session_id": session_id
-            }
-            
+            return response.choices[0].message.content.strip()
         except Exception as e:
-            error_msg = "I'm having trouble right now. Please try again."
-            await self._save_messages(business_id or 0, session_id, message, error_msg)
-            return {
-                "message": error_msg,
-                "success": False,
-                "error": str(e),
-                "chat_type": chat_type.value
-            }
+            self.logger.exception("AI response generation failed: %s", e)
+            return "I'm having trouble processing your request. Please try again."
 
-    async def _handle_dedicated_actions(self, ai_response: str, session_id: str, business_id: Optional[int]) -> str:
-        """Handle booking and order actions for dedicated chat."""
-        
-        if "BOOKING:" in ai_response:
-            booking_result = await self._handle_booking(ai_response)
-            if booking_result:
-                ai_response = ai_response.replace(
-                    "BOOKING:", "✅ Booking confirmed! "
-                ) + f"\n\nConfirmation: {booking_result['confirmation']}"
-        
-        elif "ORDER:" in ai_response:
-            order_result = await self._handle_order(ai_response)
-            if order_result:
-                ai_response = ai_response.replace(
-                    "ORDER:", "✅ Order placed! "
-                ) + f"\n\nOrder #: {order_result['order_number']}"
-        
-        return ai_response
-
-    async def _handle_dashboard_actions(self, ai_response: str, business_id: Optional[int]) -> str:
-        """Handle management actions for dashboard chat."""
-        
-        if "INVENTORY_ALERT:" in ai_response:
-            # Handle inventory alerts
-            try:
-                alert_line = [l for l in ai_response.split("\n") if "INVENTORY_ALERT:" in l][0]
-                # Process inventory alert
-                ai_response = ai_response.replace("INVENTORY_ALERT:", "📦 Inventory Alert: ")
-            except:
-                pass
-        
-        elif "ORDER_UPDATE:" in ai_response:
-            # Handle order status updates  
-            try:
-                update_line = [l for l in ai_response.split("\n") if "ORDER_UPDATE:" in l][0]
-                # Process order update
-                ai_response = ai_response.replace("ORDER_UPDATE:", "📋 Order Updated: ")
-            except:
-                pass
-        
-        return ai_response
-
-    # ... (Include all the helper methods from your original SimpleAIHandler)
-    
-    def _get_session_context(self, session_id: str) -> Dict[str, Any]:
-        """Get or create session context."""
-        if session_id not in _SESSION_CONTEXTS:
-            _SESSION_CONTEXTS[session_id] = {
-                "customer_name": None,
-                "customer_phone": None,
-                "booking_info": {},
-                "order_info": {},
-                "extracted_entities": set(),
-            }
-        return _SESSION_CONTEXTS[session_id]
-    
-    def _update_session_context(self, session_id: str, updates: Dict[str, Any]) -> None:
-        """Update session context."""
-        context = self._get_session_context(session_id)
-        for key, value in updates.items():
-            if key == "extracted_entities" and isinstance(value, (list, set)):
-                if not isinstance(context["extracted_entities"], set):
-                    context["extracted_entities"] = set()
-                context["extracted_entities"].update(value)
-            else:
-                context[key] = value
-    
-    def _get_conversation_history(self, session_id: str) -> List[str]:
-        """Get conversation history for session."""
-        history = (
-            self.db.query(Message)
-            .filter(Message.session_id == session_id)
-            .order_by(Message.created_at.desc())
-            .limit(self.max_history)
-            .all()
-        )
-        
-        chat_history = []
-        for msg in reversed(history):
-            role = "assistant" if msg.sender_type == "bot" else "user"
-            chat_history.append(f"{role}: {msg.content}")
-        
-        return chat_history
-    
-    def _get_customer_context_text(self, session_context: Dict[str, Any]) -> str:
-        """Format customer context for prompt."""
-        context_text = ""
-        if session_context.get("customer_name"):
-            context_text += f"CUSTOMER NAME: {session_context['customer_name']}\n"
-        if session_context.get("customer_phone"):
-            context_text += f"CUSTOMER PHONE: {session_context['customer_phone']}\n"
-        return context_text
-    
-    def _extract_customer_info(self, text: str) -> Dict[str, Any]:
-        """Extract customer information from text."""
-        result = {}
-        extracted_entities = set()
-        
-        # Extract name patterns
-        name_patterns = [
-            r"(?:my name is|i am|i'm|this is) ([A-Z][a-z]+(?: [A-Z][a-z]+){0,2})\b",
-            r"(?:name[:\s]+)([A-Z][a-z]+(?: [A-Z][a-z]+){0,2})\b",
-        ]
-        
-        for pattern in name_patterns:
-            name_match = re.search(pattern, text, re.IGNORECASE)
-            if name_match:
-                name = name_match.group(1).strip()
-                if len(name) > 2:
-                    result["customer_name"] = name
-                    extracted_entities.add("customer_name")
-                    break
-        
-        # Extract phone patterns
-        phone_patterns = [
-            r"(?:phone|number|tel|contact)[:\s]*(\+?\d[\d\s\-\(\)]{7,}\d)\b",
-            r"(\+?\d{1,3}[\s\-]?\(?\d{3}\)?[\s\-]?\d{3}[\s\-]?\d{4})"
-        ]
-        
-        for pattern in phone_patterns:
-            phone_match = re.search(pattern, text, re.IGNORECASE)
-            if phone_match:
-                phone = phone_match.group(1).strip()
-                phone = re.sub(r'[\s\(\)\-]+', '', phone)
-                if len(phone) >= 7:
-                    result["customer_phone"] = phone
-                    extracted_entities.add("customer_phone")
-                    break
-        
-        if extracted_entities:
-            result["extracted_entities"] = extracted_entities
-        
-        return result
-    
-    async def _handle_booking(self, ai_response: str) -> Optional[Dict[str, Any]]:
-        """Handle booking creation."""
-        try:
-            booking_line = [l for l in ai_response.split("\n") if "BOOKING:" in l][0]
-            parts = booking_line.replace("BOOKING:", "").strip().split("|")
-            
-            if len(parts) >= 6:
-                business_id, name, phone, date, time, party_size = parts[:6]
-                booking_id = f"BK-{business_id}-{int(datetime.now().timestamp())}"
-                confirmation = f"CONF-{booking_id[-6:]}"
-                
-                return {
-                    "booking_id": booking_id,
-                    "confirmation": confirmation,
-                    "business_id": business_id,
-                    "customer_name": name,
-                    "customer_phone": phone,
-                    "date": date,
-                    "time": time,
-                    "party_size": party_size,
-                }
-        except:
-            pass
-        return None
-    
-    async def _handle_order(self, ai_response: str) -> Optional[Dict[str, Any]]:
-        """Handle order creation."""
-        try:
-            order_line = [l for l in ai_response.split("\n") if "ORDER:" in l][0]
-            parts = order_line.replace("ORDER:", "").strip().split("|")
-            
-            if len(parts) >= 4:
-                business_id, items, customer_name, customer_phone = parts[:4]
-                order_id = f"ORD-{business_id}-{int(datetime.now().timestamp())}"
-                order_number = f"#{order_id[-6:]}"
-                
-                return {
-                    "order_id": order_id,
-                    "order_number": order_number,
-                    "business_id": business_id,
-                    "items": items,
-                    "customer_name": customer_name,
-                    "customer_phone": customer_phone,
-                }
-        except:
-            pass
-        return None
-    
-    def _clean_response(self, text: str) -> str:
-        """Clean AI response to remove internal thinking."""
+    async def _clean_response(self, text: str) -> str:
+        """Clean response formatting"""
         if not text:
             return text
-        
-        # Remove XML-like thinking blocks
-        text = re.sub(r'<(thinking|reasoning|internal).*?>.*?</\1>', '', text, flags=re.IGNORECASE | re.DOTALL)
-        
-        # Remove common internal thinking patterns
-        lines = text.split('\n')
-        cleaned_lines = []
-        
-        skip_patterns = [
-            'okay, ', 'let me ', 'i need to ', 'first, ', 'next, ', 'finally, ',
-            'thinking:', 'reasoning:', 'internal:', 'analysis:',
-            'based on', 'looking at', 'checking', 'reviewing'
+            
+        # Fix common formatting issues
+        fixes = [
+            (r"It'snicetomeetyou", "It's nice to meet you"),
+            (r"Itseemslikeyou're", "It seems like you're"),
+            (r"You'relookingfor", "You're looking for"),
+            (r"HowcanIassistyou", "How can I assist you"),
+            (r"I'mheretohelp", "I'm here to help"),
+            (r'([.!?])([A-Z])', r'\1 \2'),
+            (r'•(\w)', r'• \1'),
         ]
         
-        for line in lines:
-            line_stripped = line.strip().lower()
-            if any(line_stripped.startswith(pattern) for pattern in skip_patterns):
-                continue
-            cleaned_lines.append(line)
+        for pattern, replacement in fixes:
+            text = re.sub(pattern, replacement, text)
         
-        result = '\n'.join(cleaned_lines).strip()
-        result = re.sub(r'\n\s*\n\s*\n+', '\n\n', result)
-        
-        return result
-    
-    async def _save_messages(
-        self, business_id: int, session_id: str, user_message: str, ai_response: str
-    ) -> None:
-        """Save conversation messages."""
+        return re.sub(r' +', ' ', text).strip()
+
+    async def _save_conversation(self, context: UnifiedContext, response: str):
+        """Save conversation"""
         try:
-            user_msg = Message(
-                business_id=business_id,
-                session_id=session_id,
+            self.db.add(Message(
+                session_id=context.session_id,
                 sender_type="customer",
-                content=user_message,
+                content=context.user_message,
                 message_type="text",
-                ai_model_used=self.model,
-            )
-            self.db.add(user_msg)
+                business_id=context.business_id
+            ))
             
-            ai_msg = Message(
-                business_id=business_id,
-                session_id=session_id,
+            self.db.add(Message(
+                session_id=context.session_id,
                 sender_type="bot",
-                content=ai_response,
+                content=response,
                 message_type="text",
-                ai_model_used=self.model,
-            )
-            self.db.add(ai_msg)
+                business_id=context.business_id,
+                ai_model_used=self.model
+            ))
             
             self.db.commit()
-        except Exception:
+        except Exception as e:
+            self.logger.exception("Failed to save conversation for session %s: %s", context.session_id, e)
             self.db.rollback()

@@ -187,11 +187,10 @@ export default function ChatPage() {
       const body = {
         session_id: selectedConversation.id,
         message: content,
-        channel: "dashboard",
         context: {},
       }
 
-      const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/v1/chat/message`, {
+      const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/v1/global-chat`, {
         method: "POST",
         headers,
         body: JSON.stringify(body),

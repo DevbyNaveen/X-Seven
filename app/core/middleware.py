@@ -167,20 +167,3 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
         
         return response
 
-
-class BusinessContextMiddleware(BaseHTTPMiddleware):
-    """Middleware for adding business context to requests."""
-    
-    def __init__(self, app: ASGIApp):
-        super().__init__(app)
-    
-    async def dispatch(self, request: Request, call_next: Callable) -> Response:
-        # Add business context to request state
-        request.state.business_context = {
-            "request_id": getattr(request.state, "request_id", str(time.time())),
-            "timestamp": time.time(),
-            "user_agent": request.headers.get("user-agent", ""),
-        }
-        
-        response = await call_next(request)
-        return response

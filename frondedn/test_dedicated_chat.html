@@ -1,0 +1,46 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Test Dedicated Chat</title>
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/dompurify@2.3.8/dist/purify.min.js"></script>
+</head>
+<body>
+    <h1>Test Dedicated Chat Implementation</h1>
+    <button id="testBtn">Test Dedicated Chat</button>
+    <div id="output"></div>
+
+    <script src="dedicated_chat.js"></script>
+    <script>
+        document.getElementById('testBtn').addEventListener('click', async () => {
+            try {
+                // Create a mock implementation of required DOM elements
+                const mockElements = [
+                    'messages', 'input', 'sendBtn', 'statusDot', 'connectBtn', 'quickActions',
+                    'businessName', 'entryPointInfo', 'tableNumber', 'tableInfo'
+                ];
+                
+                mockElements.forEach(id => {
+                    if (!document.getElementById(id)) {
+                        const el = document.createElement('div');
+                        el.id = id;
+                        el.style.display = 'none';
+                        document.body.appendChild(el);
+                    }
+                });
+                
+                // Test the dedicated chat initialization
+                await initDedicatedChat('test-business-123', 'website_chat', 'table-5');
+                
+                document.getElementById('output').innerHTML = 
+                    '<p style="color: green;">Dedicated chat initialized successfully!</p>' +
+                    '<p>Check the browser console for detailed logs.</p>';
+            } catch (error) {
+                document.getElementById('output').innerHTML = 
+                    '<p style="color: red;">Error: ' + error.message + '</p>';
+                console.error('Test failed:', error);
+            }
+        });
+    </script>
+</body>
+</html>

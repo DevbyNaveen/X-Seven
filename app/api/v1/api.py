@@ -7,6 +7,8 @@ from app.api.v1.endpoints import (
     tables,
     orders,
     central_chat_endpoints as simple_chat,
+    global_chat_endpoints as global_chat,
+    dedicated_chat_endpoints as dedicated_chat,
 )
 
 # Create main router
@@ -47,4 +49,16 @@ api_router.include_router(
     simple_chat.router,
     prefix="/chat",
     tags=["Simple Chat"]
+)
+
+api_router.include_router(
+    global_chat.router,
+    prefix="/global-chat",
+    tags=["Global Chat"]
+)
+
+api_router.include_router(
+    dedicated_chat.router,
+    prefix="/dedicated-chat",
+    tags=["Dedicated Chat"]
 )

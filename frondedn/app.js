@@ -5,6 +5,7 @@ let API_BASE = (() => {
     if (param) {
       localStorage.setItem('x7_api_base', param);
     }
+
     const saved = localStorage.getItem('x7_api_base');
     const env = (typeof window !== 'undefined' && (window.API_BASE || window.__API_BASE__)) || saved;
     if (env) return ('' + env).replace(/\/$/, '');
@@ -22,6 +23,11 @@ const els = {
   actions: document.getElementById('quickActions'),
   statusDot: document.getElementById('statusDot'),
   connectBtn: document.getElementById('connectBtn'),
+  newChatBtn: document.getElementById('newChatBtn'),
+  chatsList: document.getElementById('chatsList'),
+  contactTitle: document.querySelector('.wa-contact'),
+  businessIdInput: document.getElementById('businessIdInput'),
+  dedicatedBtn: document.getElementById('dedicatedBtn'),
   overviewStats: document.getElementById('overviewStats'),
   conversationsList: document.getElementById('conversationsList'),
   liveOrdersList: document.getElementById('liveOrdersList'),
@@ -31,6 +37,7 @@ const els = {
 let ws = null;
 let sessionId = getOrCreateSessionId();
 let isDedicated = false;
+let activeBusinessId = null;
 let reconnectAttempts = 0;
 let reconnectTimer = null;
 const MAX_RECONNECT_DELAY = 15000;
@@ -48,6 +55,172 @@ let isTyping = false;         // track typing state to prevent duplicate events
 const receivedMessageIds = new Set();
 // Map to store message content hashes to prevent content duplicates
 const receivedMessageHashes = new Map();
+
+// ----- Conversations management -----
+const CONV_KEY = 'x7_conversations';
+const ACTIVE_CONV_KEY = 'x7_active_conversation_id';
+let conversations = []; // [{id,title,isDedicated,businessId,sessionId,lastMessage,updatedAt}]
+let activeConversationId = null;
+
+function readConversations() {
+  try {
+    const raw = sessionStorage.getItem(CONV_KEY);
+    return raw ? JSON.parse(raw) : [];
+  } catch { return []; }
+}
+
+function writeConversations(list) {
+  conversations = Array.isArray(list) ? list : [];
+  try { sessionStorage.setItem(CONV_KEY, JSON.stringify(conversations)); } catch {}
+}
+
+function generateSessionId() {
+  const hasCrypto = (typeof crypto !== 'undefined') && crypto && typeof crypto.randomUUID === 'function';
+  return hasCrypto ? crypto.randomUUID() : uuidv4();
+}
+
+function createConversation({ isDedicated, businessId, title }) {
+  const id = generateSessionId();
+  const conv = {
+    id,
+    title: title || (isDedicated && businessId ? `Business ${businessId}` : 'Global Chat'),
+    isDedicated: !!isDedicated,
+    businessId: isDedicated ? Number(businessId) || null : null,
+    sessionId: generateSessionId(),
+    lastMessage: 'Ask me anything…',
+    updatedAt: Date.now(),
+  };
+  const list = readConversations();
+  list.unshift(conv);
+  writeConversations(list);
+  renderChatList();
+  return conv;
+}
+
+function deleteConversation(id) {
+  const list = readConversations().filter(c => c.id !== id);
+  writeConversations(list);
+  try { sessionStorage.removeItem(`x7_conv_msgs:${id}`); } catch {}
+  if (activeConversationId === id) {
+    const next = list[0] || createConversation({ isDedicated: false, businessId: null, title: 'Global Chat' });
+    setActiveConversation(next.id, { connect: true, render: true });
+  } else {
+    renderChatList();
+  }
+}
+
+function setActiveConversation(id, opts = {}) {
+  const { connect = true, render = true } = opts;
+  activeConversationId = id;
+  try { sessionStorage.setItem(ACTIVE_CONV_KEY, id); } catch {}
+  const conv = readConversations().find(c => c.id === id);
+  if (!conv) return;
+  // Sync global state
+  sessionId = conv.sessionId;
+  isDedicated = !!conv.isDedicated;
+  activeBusinessId = conv.businessId || null;
+  try { sessionStorage.setItem('x7_chat_session_id', sessionId); } catch {}
+  // Update header and input
+  try { if (els.contactTitle) els.contactTitle.textContent = conv.title; } catch {}
+  try { if (els.businessIdInput) els.businessIdInput.value = conv.businessId ? String(conv.businessId) : ''; } catch {}
+  // Clear UI and load cached messages
+  try { cleanupStreamBubble(); } catch {}
+  try { els.messages.innerHTML = ''; } catch {}
+  try { els.actions.innerHTML = ''; } catch {}
+  if (render) renderChatList();
+  const loaded = loadConversationMessages(conv.id);
+  // put cursor in the composer
+  try { if (els.input) els.input.focus(); } catch {}
+  if (connect) connectWS();
+}
+
+function renderChatList() {
+  const list = readConversations();
+  const container = els.chatsList;
+  if (!container) return;
+  container.innerHTML = '';
+  list.forEach(conv => {
+    const row = document.createElement('div');
+    row.className = 'wa-chat-item' + (conv.id === activeConversationId ? ' active' : '');
+    row.style.cssText = 'padding:12px;border-bottom:1px solid #2a2f32;cursor:pointer;display:flex;align-items:center;gap:8px;';
+    const info = document.createElement('div');
+    info.style.cssText = 'flex:1;min-width:0;';
+    const name = document.createElement('div');
+    name.className = 'wa-chat-name';
+    name.style.fontWeight = '600';
+    name.textContent = conv.title;
+    const last = document.createElement('div');
+    last.className = 'wa-chat-last';
+    last.style.cssText = 'opacity:.7;font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;';
+    const when = new Date(conv.updatedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    last.textContent = `${conv.lastMessage || ''} · ${when}`;
+    info.appendChild(name);
+    info.appendChild(last);
+    const del = document.createElement('button');
+    del.className = 'btn btn-outline btn-sm';
+    del.title = 'Delete conversation';
+    del.textContent = 'Delete';
+    del.addEventListener('click', (e) => { e.stopPropagation(); deleteConversation(conv.id); });
+    row.appendChild(info);
+    row.appendChild(del);
+    row.addEventListener('click', () => setActiveConversation(conv.id, { connect: true, render: true }));
+    container.appendChild(row);
+  });
+}
+
+function convMsgsKey(id) { return `x7_conv_msgs:${id}`; }
+function readConvMessages(id) {
+  try {
+    const raw = sessionStorage.getItem(convMsgsKey(id));
+    return raw ? JSON.parse(raw) : [];
+  } catch { return []; }
+}
+function writeConvMessages(id, msgs) {
+  try { sessionStorage.setItem(convMsgsKey(id), JSON.stringify(msgs)); } catch {}
+}
+function addMessageToConversation(convId, role, text) {
+  if (!convId || !text) return;
+  const msgs = readConvMessages(convId);
+  msgs.push({ role, text, ts: Date.now() });
+  // cap to last 200
+  if (msgs.length > 200) msgs.splice(0, msgs.length - 200);
+  writeConvMessages(convId, msgs);
+  // update conversation metadata
+  const list = readConversations();
+  const idx = list.findIndex(c => c.id === convId);
+  if (idx >= 0) {
+    list[idx].lastMessage = text;
+    list[idx].updatedAt = Date.now();
+    writeConversations(list);
+    renderChatList();
+  }
+}
+
+function loadConversationMessages(convId) {
+  const msgs = readConvMessages(convId);
+  if (!Array.isArray(msgs) || !msgs.length) return 0;
+  msgs.forEach(m => {
+    if (m.role === 'user') {
+      renderMessage('user', m.text, false, true);
+    } else {
+      renderMessage('bot', m.text, true, true);
+    }
+  });
+  return msgs.length;
+}
+
+function initConversations() {
+  conversations = readConversations();
+  if (!conversations.length) {
+    const conv = createConversation({ isDedicated: false, businessId: null, title: 'Global Chat' });
+    activeConversationId = conv.id;
+  }
+  try {
+    activeConversationId = sessionStorage.getItem(ACTIVE_CONV_KEY) || activeConversationId || (conversations[0] && conversations[0].id);
+  } catch {}
+  const active = conversations.find(c => c.id === activeConversationId) || conversations[0];
+  if (active) setActiveConversation(active.id, { connect: false, render: true });
+}
 
 // Generate a simple hash for message content
 function getMessageHash(content) {
@@ -72,7 +245,8 @@ if (window.marked) {
 }
 
 async function init() {
-  renderSystem('New session: ' + sessionId);
+  // Show disconnected status until WS connects
+  try { setConnStatus(false); } catch {}
   // Ensure API base points to a live backend
   await ensureApiBase();
   // Expose API origin for other scripts that rely on REST root
@@ -80,9 +254,21 @@ async function init() {
   // Restore UI state
   try {
     const savedBiz = localStorage.getItem('x7_business_id');
-    // No businessId field in current UI; keep value only in storage if needed
+    if (savedBiz && els.businessIdInput) els.businessIdInput.value = savedBiz;
   } catch {}
-  if (els.connectBtn) els.connectBtn.addEventListener('click', connectWS);
+  // Initialize conversations list before connecting
+  initConversations();
+  if (els.connectBtn) els.connectBtn.addEventListener('click', () => { isDedicated = false; activeBusinessId = null; connectWS(); });
+  if (els.newChatBtn) els.newChatBtn.addEventListener('click', newChat);
+  if (els.dedicatedBtn) els.dedicatedBtn.addEventListener('click', connectDedicatedWS);
+  if (els.businessIdInput) {
+    els.businessIdInput.addEventListener('input', () => {
+      try { localStorage.setItem('x7_business_id', els.businessIdInput.value || ''); } catch {}
+    });
+    els.businessIdInput.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') { e.preventDefault(); connectDedicatedWS(); }
+    });
+  }
   if (els.send) els.send.addEventListener('click', onSend);
   if (els.input) {
     els.input.addEventListener('keydown', (e) => {
@@ -135,8 +321,14 @@ function cleanupStreamBubble() {
   playing = false;
   streamBuffer = '';
   playbackQueue = [];
-  if (streamEl) {
+  if (streamEl || streamLi) {
     try { if (streamLi) streamLi.classList.remove('typing'); } catch {}
+    // Remove the temporary typing bubble from the DOM to avoid duplicate elements
+    try {
+      if (streamLi && streamLi.parentNode) {
+        streamLi.parentNode.removeChild(streamLi);
+      }
+    } catch {}
     streamEl = null;
     streamLi = null;
   }
@@ -173,7 +365,20 @@ function scheduleNextWordTick() {
     return;
   }
   const word = playbackQueue.shift();
-  streamBuffer += word;
+  let piece = String(word ?? '');
+  // Normalize newline tokens
+  if (piece === '\r' || piece === '\n' || piece === '\r\n') {
+    streamBuffer += '\n';
+  } else {
+    // Markdown-friendly tweaks (space after headings and bullets)
+    piece = piece.replace(/^(#{1,6})(\S)/, '$1 $2');
+    if (piece === '*' || piece === '-') piece += ' ';
+
+    const isPunctuation = /^[\.,!?:;\)\]]+$/.test(piece);
+    const lastChar = streamBuffer.slice(-1);
+    const needsSpaceBefore = streamBuffer.length > 0 && !/\s/.test(lastChar) && !isPunctuation;
+    streamBuffer += (needsSpaceBefore ? ' ' : '') + piece;
+  }
   if (streamEl) {
     streamEl.textContent = streamBuffer;
     els.messages.scrollTop = els.messages.scrollHeight;
@@ -220,12 +425,29 @@ function finalizeAssistantMessage(finalText, actions, messageId) {
   // Always create a new message element instead of reusing existing ones
   cleanupStreamBubble();
   
+  // Generate content hash to prevent content duplicates
+  const contentHash = getMessageHash(finalText);
+  
   // Check if we already received this message ID to prevent duplicates
   if (messageId && receivedMessageIds.has(messageId)) {
     console.log('Duplicate message ID detected and prevented:', messageId);
-    streamBuffer = '';
-    playbackQueue = [];
     return;
+  }
+  
+  // Check content hash to prevent content duplicates
+  if (contentHash && receivedMessageHashes.has(contentHash)) {
+    console.log('Duplicate message content detected and prevented:', contentHash);
+    return;
+  }
+  
+  // Check if we already have a finalized message with the same content to prevent duplicates
+  const lastMessage = els.messages.lastElementChild;
+  if (lastMessage && lastMessage.classList.contains('bot')) {
+    const lastBubble = lastMessage.querySelector('.bubble');
+    if (lastBubble && lastBubble.textContent === finalText) {
+      console.log('Duplicate message content detected in DOM:', finalText);
+      return;
+    }
   }
   
   // Add message ID to the set of received IDs
@@ -236,15 +458,6 @@ function finalizeAssistantMessage(finalText, actions, messageId) {
       const first = receivedMessageIds.values().next().value;
       receivedMessageIds.delete(first);
     }
-  }
-  
-  // Generate content hash to prevent content duplicates
-  const contentHash = getMessageHash(finalText);
-  if (contentHash && receivedMessageHashes.has(contentHash)) {
-    console.log('Duplicate message content detected and prevented:', contentHash);
-    streamBuffer = '';
-    playbackQueue = [];
-    return;
   }
   
   // Add content hash to prevent future duplicates
@@ -259,18 +472,6 @@ function finalizeAssistantMessage(finalText, actions, messageId) {
     }
   }
   
-  // Check if we already have a finalized message with the same content to prevent duplicates
-  const lastMessage = els.messages.lastElementChild;
-  if (lastMessage && lastMessage.classList.contains('bot')) {
-    const lastBubble = lastMessage.querySelector('.bubble');
-    if (lastBubble && lastBubble.textContent === finalText) {
-      // Duplicate message detected, don't create a new one
-      streamBuffer = '';
-      playbackQueue = [];
-      return;
-    }
-  }
-  
   const li = document.createElement('li');
   li.className = 'msg bot';
   const bubble = document.createElement('div');
@@ -280,7 +481,7 @@ function finalizeAssistantMessage(finalText, actions, messageId) {
   const ts = document.createElement('div');
   ts.className = 'timestamp';
   ts.innerText = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-  li.appendChild(ts);
+  bubble.appendChild(ts);
   els.messages.appendChild(li);
   els.messages.scrollTop = els.messages.scrollHeight;
   streamEl = bubble;
@@ -308,6 +509,8 @@ function finalizeAssistantMessage(finalText, actions, messageId) {
   try { if (streamLi) streamLi.classList.remove('typing'); } catch {}
   streamEl = null;
   streamLi = null;
+  // Persist to active conversation
+  try { if (activeConversationId) addMessageToConversation(activeConversationId, 'bot', text || ''); } catch {}
   if (actions && Array.isArray(actions)) {
     renderActions(actions);
   }
@@ -319,12 +522,34 @@ function onBizInput() {
 
 function getOrCreateSessionId() {
   const key = 'x7_chat_session_id';
-  let id = localStorage.getItem(key);
+  // Use sessionStorage to make the session ephemeral per tab
+  let id = null;
+  try { id = sessionStorage.getItem(key); } catch {}
   if (!id) {
-    id = crypto.randomUUID ? crypto.randomUUID() : uuidv4();
-    localStorage.setItem(key, id);
+    const hasCrypto = (typeof crypto !== 'undefined') && crypto && typeof crypto.randomUUID === 'function';
+    id = hasCrypto ? crypto.randomUUID() : uuidv4();
+    try { sessionStorage.setItem(key, id); } catch {}
   }
   return id;
+}
+
+function deriveDedicatedSessionId(baseId, bizId) {
+  const suffix = `-biz-${String(bizId).slice(0, 12)}`;
+  const id = `${baseId}${suffix}`;
+  // Message.session_id max length is 50
+  return id.length > 50 ? id.slice(0, 50) : id;
+}
+
+// Start a brand-new chat session (ephemeral per tab)
+function newChat() {
+  // Create a new conversation preserving current mode
+  const conv = createConversation({
+    isDedicated: !!isDedicated,
+    businessId: isDedicated ? activeBusinessId : null,
+    title: isDedicated && activeBusinessId ? `Business ${activeBusinessId}` : 'Global Chat',
+  });
+  setActiveConversation(conv.id, { connect: true, render: true });
+  try { if (els.input) els.input.value = ''; } catch {}
 }
 
 function connectWS() {
@@ -334,27 +559,31 @@ function connectWS() {
   const origin = `${wsScheme}://${url.host}`;
 
   let path;
-  // Use the correct WebSocket endpoint (dedicated chat endpoint doesn't exist)
-  path = `/api/v1/chat/ws/${sessionId}`;
+  const effectiveSessionId = (isDedicated && activeBusinessId)
+    ? deriveDedicatedSessionId(sessionId, activeBusinessId)
+    : sessionId;
+  if (isDedicated && activeBusinessId) {
+    path = `/api/v1/dedicated-chat/ws/business/${activeBusinessId}/${effectiveSessionId}`;
+  } else {
+    // Default to global chat
+    path = `/api/v1/global-chat/ws/${effectiveSessionId}`;
+  }
 
   const wsUrl = origin + path;
   ws = new WebSocket(wsUrl);
 
   ws.onopen = () => {
     setConnStatus(true);
-    notify('Connected');
     if (reconnectTimer) { try { clearTimeout(reconnectTimer); } catch {} reconnectTimer = null; }
     reconnectAttempts = 0;
   };
   ws.onclose = () => {
     console.log('WebSocket connection closed');
     setConnStatus(false);
-    notify('Disconnected');
     scheduleReconnect();
   };
   ws.onerror = (err) => {
     console.error('WebSocket error', err);
-    notify('WebSocket error');
   };
   ws.onmessage = (evt) => {
     (async () => {
@@ -364,7 +593,8 @@ function connectWS() {
         console.log('Received WebSocket message:', data.type, data);
         switch (data.type) {
           case 'connected':
-            renderSystem(data.message || 'Connected to X-SevenAI! How can I help you today?');
+            console.log('WebSocket connected message received');
+            // Do not render a chat bubble for connection messages
             break;
           case 'typing':
           case 'typing_start':
@@ -374,17 +604,21 @@ function connectWS() {
               // Ensure we have a stream bubble for typing indicator
               ensureStreamBubble();
               console.log('Started typing indicator');
+            } else {
+              console.log('Ignoring duplicate typing_start message');
             }
             break;
           case 'character':
             // Handle character-by-character streaming
             if (data.character) {
+              console.log('Received character:', data.character);
               handleCharStream(data.character);
             }
             break;
           case 'word':
             // Handle word-by-word streaming
             if (data.word !== undefined) {
+              console.log('Received word:', data.word);
               handleWordStream(data.word);
             }
             break;
@@ -393,7 +627,7 @@ function connectWS() {
             // Finalize the message only if we've been streaming characters/words
             // and ensure we don't create duplicate messages
             if ((streamEl || playbackQueue.length > 0) && !streamEl?.parentElement?.classList?.contains('finalized')) {
-              console.log('Finalizing assistant message:', data.message);
+              console.log('Finalizing assistant message from typing_complete:', data.message);
               finalizeAssistantMessage(data.message || data.partial_message || '', data.suggested_actions || [], data.message_id);
               // Mark the message as finalized to prevent duplicates
               if (streamEl && streamEl.parentElement) {
@@ -404,6 +638,7 @@ function connectWS() {
             }
             break;
           case 'message':
+            console.log('Received complete message:', data.message);
             // Create a new message bubble for each message
             cleanupStreamBubble();
             renderBot(data.message || '');
@@ -412,6 +647,7 @@ function connectWS() {
             }
             break;
           case 'suggested_actions':
+            console.log('Received suggested actions:', data.data);
             if (data.data) renderActions(data.data);
             break;
           case 'typing_end':
@@ -422,6 +658,7 @@ function connectWS() {
             // Ensure any remaining content is finalized
             if (streamEl || playbackQueue.length > 0) {
               const finalText = streamBuffer + playbackQueue.join(' ');
+              console.log('Finalizing remaining stream content:', finalText);
               if (finalText.trim()) {
                 finalizeAssistantMessage(finalText, [], null);
               }
@@ -429,6 +666,7 @@ function connectWS() {
             }
             break;
           case 'metadata':
+            console.log('Received metadata:', data);
             // no-op in UI for now
             break;
           case 'error':
@@ -438,6 +676,7 @@ function connectWS() {
           default:
             console.warn('Unknown message type:', data.type, data);
             if (data.message) {
+              console.log('Handling unknown message type with message content');
               finalizeAssistantMessage(data.message, data.suggested_actions || []);
             }
             break;
@@ -448,6 +687,38 @@ function connectWS() {
       }
     })();
   };
+}
+
+function connectDedicatedWS() {
+  // Read business ID from UI
+  const raw = (els.businessIdInput && els.businessIdInput.value || '').trim();
+  if (!raw) {
+    notify('Enter a Business ID to connect to Dedicated Chat');
+    return;
+  }
+
+  if (!/^\d+$/.test(raw)) {
+    notify('Please enter a numeric Business ID to use dedicated WebSocket chat');
+    return;
+  }
+
+  activeBusinessId = parseInt(raw, 10);
+  isDedicated = true;
+  try { localStorage.setItem('x7_business_id', String(activeBusinessId)); } catch {}
+  // Update active conversation metadata to reflect dedicated mode
+  try {
+    const list = readConversations();
+    const idx = list.findIndex(c => c.id === activeConversationId);
+    if (idx >= 0) {
+      list[idx].isDedicated = true;
+      list[idx].businessId = activeBusinessId;
+      list[idx].title = `Business ${activeBusinessId}`;
+      writeConversations(list);
+      renderChatList();
+    }
+    if (els.contactTitle) els.contactTitle.textContent = `Business ${activeBusinessId}`;
+  } catch {}
+  connectWS();
 }
 
 function cleanupWS() {
@@ -472,12 +743,12 @@ async function ensureApiBase() {
       if (API_BASE !== base) {
         API_BASE = base;
         try { localStorage.setItem('x7_api_base', base); } catch {}
-        renderSystem('Using API: ' + base);
+        // Do not render chat bubble for API selection
       }
       return;
     }
   }
-  renderSystem('Could not reach API at ' + API_BASE + '. Set ?api=http://localhost:8000/api/v1 and reload.');
+  console.warn('Could not reach API at ' + API_BASE + '. Set ?api=http://localhost:8000/api/v1 and reload.');
 }
 
 async function pingHealth(base) {
@@ -522,9 +793,20 @@ async function onSend() {
 
 async function sendViaHttp(text) {
   try {
-    // Use only the regular chat endpoint - let AI handle everything
-    const url = `${API_BASE}/chat/message`;
-    const body = { message: text, session_id: sessionId, context: { channel: 'web' } };
+    // Route message based on chat mode
+    let url = `${API_BASE}/global-chat`;
+    const context = { channel: 'web' };
+    let effectiveSessionId = sessionId;
+    if (isDedicated) {
+      if (!activeBusinessId) {
+        renderSystem('No Business ID set for dedicated chat. Enter a numeric ID and press Dedicated.');
+        return;
+      }
+      url = `${API_BASE}/dedicated-chat/business/${activeBusinessId}`;
+      context.entry_point = 'direct';
+      effectiveSessionId = deriveDedicatedSessionId(sessionId, activeBusinessId);
+    }
+    const body = { message: text, session_id: effectiveSessionId, context };
 
     const res = await fetch(url, {
       method: 'POST',
@@ -581,7 +863,7 @@ function renderUser(text) { renderMessage('user', text, false); }
 function renderBot(text) { renderMessage('bot', text, true); }
 function renderSystem(text) { renderMessage('system', text, false); }
 
-function renderMessage(role, text, markdown = false) {
+function renderMessage(role, text, markdown = false, skipPersist = false) {
   const li = document.createElement('li');
   li.className = 'msg ' + (role === 'user' ? 'user' : 'bot');
 
@@ -605,15 +887,32 @@ function renderMessage(role, text, markdown = false) {
   ts.innerText = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 
   li.appendChild(bubble);
-  li.appendChild(ts);
+  bubble.appendChild(ts);
   els.messages.appendChild(li);
   els.messages.scrollTop = els.messages.scrollHeight;
+  // Persist to active conversation (skip system)
+  if (!skipPersist && (role === 'user' || role === 'bot') && activeConversationId) {
+    addMessageToConversation(activeConversationId, role, text);
+  }
 }
 
 function setConnStatus(on) {
-  els.statusDot.classList.toggle('on', !!on);
-  els.statusDot.classList.toggle('off', !on);
-  els.statusDot.title = on ? 'Connected' : 'Disconnected';
+  const dot = els.statusDot;
+  if (!dot) return;
+  dot.classList.toggle('on', !!on);
+  dot.classList.toggle('off', !on);
+  if (on) {
+    if (isDedicated) {
+      dot.style.background = '#facc15'; // yellow for dedicated
+      dot.title = 'Connected (Dedicated)';
+    } else {
+      dot.style.background = '#22c55e'; // green for global
+      dot.title = 'Connected (Global)';
+    }
+  } else {
+    dot.style.background = '#ef4444'; // red for disconnected
+    dot.title = 'Disconnected';
+  }
 }
 
 function notify(msg) {

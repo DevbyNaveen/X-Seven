@@ -1,7 +1,9 @@
 """Main FastAPI application with WebSocket support."""
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, Request, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from sqlalchemy.orm import Session
+from app.config.database import get_db
 from app.config.settings import settings
 from app.config.database import engine, Base
 from app.config.logging import get_logger
@@ -12,7 +14,6 @@ from app.core.middleware import (
     RequestLoggingMiddleware,
     RateLimitMiddleware,
     SecurityHeadersMiddleware,
-    BusinessContextMiddleware
 )
 from app.ngrok_config import get_cors_config, init_websocket_endpoints
 
@@ -33,12 +34,13 @@ app = FastAPI(
 )
 
 # Add middleware in order (last added = first executed)
-app.add_middleware(CORSMiddleware, **get_cors_config())
+# Move CORSMiddleware to be added last so it executes first and properly handles
+# CORS preflight (OPTIONS) requests before other middleware.
 app.add_middleware(CorrelationIdMiddleware)
 app.add_middleware(ErrorHandlingMiddleware)
 app.add_middleware(RequestLoggingMiddleware)
 app.add_middleware(SecurityHeadersMiddleware)
-app.add_middleware(BusinessContextMiddleware)
+app.add_middleware(CORSMiddleware, **get_cors_config())
 
 # Initialize WebSocket endpoints
 init_websocket_endpoints(app)
@@ -77,6 +79,19 @@ async def health_check():
         "status": "healthy",
         "environment": settings.ENVIRONMENT,
         "version": settings.VERSION
+    }
+
+
+# RAG Test endpoint
+@app.get("/test-rag")
+async def test_rag(db: Session = Depends(get_db)):
+    """Test endpoint for RAG functionality."""
+    from app.services.ai.centralAI.rag_search import RAGSearch
+    rag_search = RAGSearch(db)
+    test_results = rag_search.test_search_functionality()
+    return {
+        "status": "success",
+        "results": test_results
     }
 
 
