@@ -11,6 +11,7 @@ Usage:
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session
 from typing import Dict, List, Optional
+import os
 
 from app.config.database import Base, engine, SessionLocal
 from app.models import (
@@ -363,13 +364,16 @@ def init_db() -> None:
     # Ensure all tables exist
     Base.metadata.create_all(bind=engine)
 
-    # Seed dataset
-    db = SessionLocal()
-    try:
-        seed_demo_business(db)
-        seed_full_dataset(db)
-    finally:
-        db.close()
+    # Optionally seed dataset only when explicitly enabled
+    if os.getenv("SEED_DEMO", "0") == "1":
+        db = SessionLocal()
+        try:
+            seed_demo_business(db)
+            seed_full_dataset(db)
+        finally:
+            db.close()
+    else:
+        print("SEED_DEMO not set to 1 — skipping demo data seeding.")
 
 
 if __name__ == "__main__":

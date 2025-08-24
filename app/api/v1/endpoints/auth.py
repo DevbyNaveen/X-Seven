@@ -56,7 +56,8 @@ async def register_business(
         contact_info={
             "email": request.admin_email,
             "phone": request.admin_phone
-        }
+        },
+        category=request.business_category if getattr(request, "business_category", None) else None,
     )
     db.add(business)
     db.commit()

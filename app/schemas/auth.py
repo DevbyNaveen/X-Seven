@@ -1,7 +1,7 @@
 """Authentication schemas."""
 from typing import Optional
 from pydantic import BaseModel, EmailStr
-from app.models import UserRole
+from app.models import UserRole, BusinessCategory
 
 
 class RegisterBusinessRequest(BaseModel):
@@ -12,6 +12,7 @@ class RegisterBusinessRequest(BaseModel):
     admin_email: EmailStr
     admin_password: str
     admin_phone: Optional[str] = None
+    business_category: Optional[BusinessCategory] = None
 
     class Config:
         json_schema_extra = {
@@ -21,7 +22,8 @@ class RegisterBusinessRequest(BaseModel):
                 "admin_name": "John Doe",
                 "admin_email": "john@sunrisecafe.com",
                 "admin_password": "securepassword123",
-                "admin_phone": "+1234567890"
+                "admin_phone": "+1234567890",
+                "business_category": "food_hospitality"
             }
         }
 

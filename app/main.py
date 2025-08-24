@@ -14,6 +14,7 @@ from app.core.middleware import (
     SecurityHeadersMiddleware,
     BusinessContextMiddleware
 )
+from app.ngrok_config import get_cors_config, init_websocket_endpoints
 
 # Get logger
 logger = get_logger(__name__)
@@ -32,25 +33,15 @@ app = FastAPI(
 )
 
 # Add middleware in order (last added = first executed)
+app.add_middleware(CORSMiddleware, **get_cors_config())
 app.add_middleware(CorrelationIdMiddleware)
 app.add_middleware(ErrorHandlingMiddleware)
 app.add_middleware(RequestLoggingMiddleware)
 app.add_middleware(SecurityHeadersMiddleware)
 app.add_middleware(BusinessContextMiddleware)
 
-# Configure CORS (updated for WebSocket support)
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=[
-        "http://localhost:5173",
-        "http://127.0.0.1:5173",
-    ],
-    allow_credentials=True,
-    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS", "HEAD"],
-    allow_headers=["*"],
-    expose_headers=["*"]
-)
-
+# Initialize WebSocket endpoints
+init_websocket_endpoints(app)
 
 # Exception handlers
 @app.exception_handler(Exception)
@@ -63,15 +54,18 @@ async def general_exception_handler(request: Request, exc: Exception):
     )
 
 
-# Root endpoint
-@app.get("/")
-async def root():
-    """Root endpoint."""
+# Root endpoint with OPTIONS handler
+@app.api_route("/", methods=["GET", "OPTIONS"])
+async def root(request: Request):
+    """Root endpoint with CORS support."""
+    if request.method == "OPTIONS":
+        return JSONResponse(status_code=200, content={"method": "OPTIONS"})
+    
     return {
-        "message": "Welcome to X-SevenAI API",
+        "name": settings.PROJECT_NAME,
         "version": settings.VERSION,
-        "docs": "/docs",
-        "websocket": "/api/v1/chat/ws/{session_id}"
+        "docs": "/docs" if not is_prod else None,
+        "environment": settings.ENVIRONMENT
     }
 
 

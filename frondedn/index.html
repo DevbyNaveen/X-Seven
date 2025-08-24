@@ -1,45 +1,392 @@
-<!doctype html>
+<!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>X‑SevenAI Chat</title>
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="style.css" />
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>X-SevenAI Restaurant Management</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <link rel="stylesheet" href="style.css">
 </head>
 <body>
-  <div id="app">
-    <header class="app-header">
-      <div class="title">
-        <div class="avatar">🤖</div>
-        <div>
-          <div class="name">X‑SevenAI</div>
-          <div class="sub">WhatsApp‑like Chat</div>
+    <div class="app-container">
+        <!-- Sidebar Navigation -->
+        <nav class="sidebar">
+            <div class="logo">
+                <i class="fas fa-robot"></i>
+                <span>X-SevenAI</span>
+            </div>
+            <ul class="nav-links">
+                <li class="active" data-page="dashboard">
+                    <i class="fas fa-tachometer-alt"></i>
+                    <span>Dashboard</span>
+                </li>
+                <li data-page="bookings">
+                    <i class="far fa-calendar-alt"></i>
+                    <span>Bookings</span>
+                </li>
+                <li data-page="orders">
+                    <i class="fas fa-utensils"></i>
+                    <span>Orders</span>
+                </li>
+                <li data-page="tables">
+                    <i class="fas fa-chair"></i>
+                    <span>Tables</span>
+                </li>
+                <li data-page="customers">
+                    <i class="fas fa-users"></i>
+                    <span>Customers</span>
+                </li>
+                <li data-page="analytics">
+                    <i class="fas fa-chart-bar"></i>
+                    <span>Analytics</span>
+                </li>
+                <li data-page="chat">
+                    <i class="fas fa-comments"></i>
+                    <span>AI Chat</span>
+                </li>
+                <li data-page="settings">
+                    <i class="fas fa-cog"></i>
+                    <span>Settings</span>
+                </li>
+            </ul>
+            <div class="user-profile">
+                <img src="https://ui-avatars.com/api/?name=Admin" alt="Admin">
+                <div class="user-info">
+                    <span class="user-name">Admin User</span>
+                    <span class="user-role">Administrator</span>
+                </div>
+            </div>
+        </nav>
+
+        <!-- Main Content -->
+        <main class="main-content" id="main-content">
+            <!-- Content will be loaded here dynamically -->
+            <div class="empty-state">
+                <i class="fas fa-book-open"></i>
+                <h2>Welcome to X-SevenAI</h2>
+                <p>Select an option from the sidebar to get started</p>
+            </div>
+            
+            <!-- Bookings Page -->
+            <div id="bookings-page" class="page" style="display: none;">
+                <div class="page-header">
+                    <h1>Bookings</h1>
+                    <div class="header-actions">
+                        <div class="search-bar">
+                            <i class="fas fa-search"></i>
+                            <input type="text" id="search-bookings" placeholder="Search bookings...">
+                        </div>
+                        <button id="new-booking-btn" class="btn btn-primary">
+                            <i class="fas fa-plus"></i> New Booking
+                        </button>
+                    </div>
+                </div>
+                
+                <div class="bookings-filters">
+                    <div class="filter-group">
+                        <label for="filter-status">Status</label>
+                        <select id="filter-status" class="form-select">
+                            <option value="">All Statuses</option>
+                            <option value="pending">Pending</option>
+                            <option value="confirmed">Confirmed</option>
+                            <option value="seated">Seated</option>
+                            <option value="completed">Completed</option>
+                            <option value="cancelled">Cancelled</option>
+                        </select>
+                    </div>
+                    
+                    <div class="filter-group">
+                        <label for="filter-date">Date</label>
+                        <input type="date" id="filter-date" class="form-input">
+                    </div>
+                    
+                    <div class="filter-group">
+                        <label for="filter-party-size">Party Size</label>
+                        <select id="filter-party-size" class="form-select">
+                            <option value="">Any Size</option>
+                            <option value="1">1 person</option>
+                            <option value="2">2 people</option>
+                            <option value="3">3-4 people</option>
+                            <option value="4">5-6 people</option>
+                            <option value="5">7+ people</option>
+                        </select>
+                    </div>
+                    
+                    <button id="apply-filters" class="btn btn-secondary">
+                        <i class="fas fa-filter"></i> Apply
+                    </button>
+                    <button id="reset-filters" class="btn btn-outline">
+                        <i class="fas fa-undo"></i> Reset
+                    </button>
+                </div>
+            </div>
+
+            <!-- Page Content -->
+            <div class="page-content">
+                <!-- Dashboard Page -->
+                <div id="dashboard" class="page active">
+                    <div class="dashboard-grid">
+                        <section class="overview-card">
+                            <h2>Overview</h2>
+                            <div id="overviewStats" class="stats-grid"></div>
+                        </section>
+                        <section class="card">
+                            <h2>Active Conversations</h2>
+                            <ul id="conversationsList" class="list"></ul>
+                        </section>
+                        <section class="card">
+                            <h2>Live Orders</h2>
+                            <ul id="liveOrdersList" class="list"></ul>
+                        </section>
+                    </div>
+                </div>
+
+                <!-- Chat Page -->
+                <div id="chat" class="page">
+                    <div class="chat-topbar" style="display:flex;align-items:center;gap:8px;margin-bottom:8px;">
+                      <span id="statusDot" class="status-dot off" title="Disconnected" style="width:10px;height:10px;border-radius:50%;display:inline-block;background:#999"></span>
+                      <button id="connectBtn" class="btn btn-outline btn-sm" type="button">Connect</button>
+                    </div>
+                    <div class="chat-container">
+                        <div class="chat-messages" id="messages" aria-live="polite"></div>
+                        <div class="chat-composer">
+                            <div class="composer-inner">
+                                <textarea id="input" rows="1" placeholder="Type a message" autocomplete="off"></textarea>
+                                <button id="sendBtn" class="btn primary" aria-label="Send">
+                                    <i class="fas fa-paper-plane"></i>
+                                </button>
+                            </div>
+                            <div id="quickActions" class="actions"></div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Other Pages -->
+                <div id="bookings" class="page"></div>
+                
+                <!-- Orders Page -->
+                <div id="orders" class="page">
+                  <div class="page-header">
+                    <h1>Orders</h1>
+                    <div class="header-actions">
+                      <div class="search-bar">
+                        <i class="fas fa-search"></i>
+                        <input type="text" id="search-orders" placeholder="Search orders...">
+                      </div>
+                      <button id="new-order-btn" class="btn btn-primary">
+                        <i class="fas fa-plus"></i> New Order
+                      </button>
+                    </div>
+                  </div>
+                  
+                  <div class="orders-filters">
+                    <div class="filter-group">
+                      <label for="order-status">Status</label>
+                      <select id="order-status" class="form-select">
+                        <option value="">All Statuses</option>
+                        <option value="pending">Pending</option>
+                        <option value="preparing">Preparing</option>
+                        <option value="ready">Ready</option>
+                        <option value="served">Served</option>
+                        <option value="completed">Completed</option>
+                        <option value="cancelled">Cancelled</option>
+                      </select>
+                    </div>
+                    
+                    <div class="filter-group">
+                      <label for="order-type">Order Type</label>
+                      <select id="order-type" class="form-select">
+                        <option value="">All Types</option>
+                        <option value="dine-in">Dine-in</option>
+                        <option value="takeaway">Takeaway</option>
+                        <option value="delivery">Delivery</option>
+                      </select>
+                    </div>
+                    
+                    <div class="filter-group">
+                      <label for="order-date">Date</label>
+                      <input type="date" id="order-date" class="form-input">
+                    </div>
+                    
+                    <button id="apply-order-filters" class="btn btn-secondary">
+                      <i class="fas fa-filter"></i> Apply
+                    </button>
+                    <button id="reset-order-filters" class="btn btn-outline">
+                      <i class="fas fa-undo"></i> Reset
+                    </button>
+                  </div>
+                  
+                  <div class="table-responsive">
+                    <table id="orders-table">
+                      <thead>
+                        <tr>
+                          <th>Order #</th>
+                          <th>Customer</th>
+                          <th>Items</th>
+                          <th>Total</th>
+                          <th>Type</th>
+                          <th>Status</th>
+                          <th>Order Time</th>
+                          <th>Actions</th>
+                        </tr>
+                      </thead>
+                      <tbody id="orders-tbody">
+                        <tr class="empty-row">
+                          <td colspan="8" class="empty-state">
+                            <i class="fas fa-receipt"></i>
+                            <h3>No orders found</h3>
+                            <p>Create your first order to get started</p>
+                            <button class="btn btn-primary mt-2" id="empty-new-order">
+                              <i class="fas fa-plus"></i> New Order
+                            </button>
+                          </td>
+                        </tr>
+                      </tbody>
+                    </table>
+                  </div>
+                  
+                  <div class="pagination">
+                    <button id="orders-prev-page" class="btn btn-icon" disabled>
+                      <i class="fas fa-chevron-left"></i>
+                    </button>
+                    <span class="page-info">Page <span id="orders-current-page">1</span> of <span id="orders-total-pages">1</span></span>
+                    <button id="orders-next-page" class="btn btn-icon" disabled>
+                      <i class="fas fa-chevron-right"></i>
+                    </button>
+                  </div>
+                </div>
+                
+                <div id="tables" class="page"></div>
+                <div id="customers" class="page"></div>
+                <div id="analytics" class="page"></div>
+                <div id="settings" class="page"></div>
+            </div>
+        </main>
+    </div>
+
+    <!-- Loading Overlay -->
+    <div id="loadingOverlay" class="loading-overlay">
+        <div class="spinner"></div>
+    </div>
+
+    <!-- Order Modal -->
+    <div id="order-modal" class="modal">
+      <div class="modal-content" style="max-width: 800px;">
+        <div class="modal-header">
+          <h3 id="order-modal-title">New Order</h3>
+          <button class="close-modal" id="close-order-modal">&times;</button>
+        </div>
+        <div class="modal-body">
+          <form id="order-form">
+            <input type="hidden" id="order-id">
+            
+            <div class="form-row">
+              <div class="form-group" style="flex: 2;">
+                <label for="order-customer">Customer <span class="required">*</span></label>
+                <select id="order-customer" class="form-select" required>
+                  <option value="">Select a customer or start typing</option>
+                  <!-- Customers will be populated here -->
+                </select>
+              </div>
+              <div class="form-group">
+                <label for="order-type-select">Order Type <span class="required">*</span></label>
+                <select id="order-type-select" class="form-select" required>
+                  <option value="dine-in">Dine-in</option>
+                  <option value="takeaway">Takeaway</option>
+                  <option value="delivery">Delivery</option>
+                </select>
+              </div>
+              <div class="form-group" id="table-selection-group">
+                <label for="order-table">Table <span class="required">*</span></label>
+                <select id="order-table" class="form-select" required>
+                  <option value="">Select a table</option>
+                  <!-- Tables will be populated here -->
+                </select>
+              </div>
+            </div>
+            
+            <div class="form-row">
+              <div class="form-group" style="flex: 1;">
+                <label>Order Items <span class="required">*</span></label>
+                <div class="order-items-container">
+                  <div class="order-item" id="order-items-list">
+                    <!-- Order items will be added here -->
+                  </div>
+                  <button type="button" id="add-order-item" class="btn btn-outline btn-sm">
+                    <i class="fas fa-plus"></i> Add Item
+                  </button>
+                </div>
+              </div>
+            </div>
+            
+            <div class="form-row">
+              <div class="form-group">
+                <label for="order-notes">Special Instructions</label>
+                <textarea id="order-notes" class="form-textarea" rows="2"></textarea>
+              </div>
+            </div>
+            
+            <div class="order-summary">
+              <div class="order-summary-row">
+                <span>Subtotal:</span>
+                <span id="order-subtotal">$0.00</span>
+              </div>
+              <div class="order-summary-row">
+                <span>Tax (10%):</span>
+                <span id="order-tax">$0.00</span>
+              </div>
+              <div class="order-summary-row total">
+                <span>Total:</span>
+                <span id="order-total">$0.00</span>
+              </div>
+            </div>
+            
+            <div class="form-actions">
+              <button type="button" class="btn btn-outline" id="cancel-order">Cancel</button>
+              <button type="button" class="btn btn-secondary" id="save-draft">Save as Draft</button>
+              <button type="submit" class="btn btn-primary" id="place-order">Place Order</button>
+            </div>
+          </form>
         </div>
       </div>
-      <div class="controls">
-        <button id="connectBtn" class="btn ghost">Connect</button>
-        <span id="statusDot" class="dot off" title="Disconnected"></span>
-      </div>
-    </header>
+    </div>
 
-    <main class="chat">
-      <ul id="messages" class="messages" aria-live="polite"></ul>
-    </main>
+    <!-- Modals -->
+    <div id="modal" class="modal">
+        <div class="modal-content">
+            <span class="close-modal">&times;</span>
+            <div id="modal-body"></div>
+        </div>
+    </div>
 
-    <footer class="composer">
-      <div class="composer-inner">
-        <textarea id="input" rows="1" placeholder="Type a message" autocomplete="off"></textarea>
-        <button id="sendBtn" class="btn primary" aria-label="Send">➤</button>
-      </div>
-      <div id="quickActions" class="actions"></div>
-    </footer>
-  </div>
-  <!-- Markdown + Sanitizer -->
-  <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/dompurify@3.0.9/dist/purify.min.js"></script>
-  <script type="module" src="app.js"></script>
-</body>
+    <!-- Templates -->
+    <template id="loading-template">
+        <div class="loading-spinner">
+            <div class="spinner"></div>
+        </div>
+    </template>
+
+    <!-- External Dependencies -->
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/dompurify/2.4.0/purify.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    
+    <!-- App Scripts -->
+    <script src="app.js"></script>
+    <script src="dashboard.js"></script>
+    
+    <script>
+      // Initialize both chat and dashboard
+      document.addEventListener('DOMContentLoaded', function() {
+        // Initialize chat if on chat page
+        if (window.initChat) window.initChat();
+
+        // Initialize dashboard if on dashboard page
+        if (window.initDashboard) window.initDashboard();
+      });
+    </script>
+  </body>
 </html>

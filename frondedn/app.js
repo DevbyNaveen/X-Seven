@@ -22,6 +22,10 @@ const els = {
   actions: document.getElementById('quickActions'),
   statusDot: document.getElementById('statusDot'),
   connectBtn: document.getElementById('connectBtn'),
+  overviewStats: document.getElementById('overviewStats'),
+  conversationsList: document.getElementById('conversationsList'),
+  liveOrdersList: document.getElementById('liveOrdersList'),
+  refreshBtn: document.getElementById('refreshBtn'),
 };
 
 let ws = null;
@@ -57,7 +61,8 @@ function getMessageHash(content) {
   return hash.toString();
 }
 
-(async () => { await init(); })();
+// Expose init without auto-running to avoid duplicate init with index.html
+window.initChat = async function() { await init(); };
 
 // Configure Markdown rendering if available
 if (window.marked) {
@@ -70,22 +75,40 @@ async function init() {
   renderSystem('New session: ' + sessionId);
   // Ensure API base points to a live backend
   await ensureApiBase();
+  // Expose API origin for other scripts that rely on REST root
+  try { window.API_BASE_URL = API_BASE.replace(/\/api\/v1$/, ''); } catch {}
   // Restore UI state
   try {
     const savedBiz = localStorage.getItem('x7_business_id');
-    if (savedBiz) els.businessId.value = savedBiz;
+    // No businessId field in current UI; keep value only in storage if needed
   } catch {}
-  els.connectBtn.addEventListener('click', connectWS);
-  els.send.addEventListener('click', onSend);
-  els.input.addEventListener('keydown', (e) => {
-    if (e.key === 'Enter' && !e.shiftKey) {
-      e.preventDefault();
-      onSend();
-    }
-  });
+  if (els.connectBtn) els.connectBtn.addEventListener('click', connectWS);
+  if (els.send) els.send.addEventListener('click', onSend);
+  if (els.input) {
+    els.input.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' && !e.shiftKey) {
+        e.preventDefault();
+        onSend();
+      }
+    });
+  }
 
   // Auto-connect on load
   connectWS();
+
+  // Initial fetch (only if containers exist)
+  if (els.overviewStats) fetchDashboardOverview();
+  if (els.conversationsList) fetchActiveConversations();
+  if (els.liveOrdersList) fetchLiveOrders();
+
+  // Refresh button
+  if (els.refreshBtn) {
+    els.refreshBtn.addEventListener('click', () => {
+      if (els.overviewStats) fetchDashboardOverview();
+      if (els.conversationsList) fetchActiveConversations();
+      if (els.liveOrdersList) fetchLiveOrders();
+    });
+  }
 }
 
 // --- Streaming helpers (character-by-character) ---
@@ -595,6 +618,77 @@ function setConnStatus(on) {
 
 function notify(msg) {
   renderSystem(msg);
+}
+
+async function fetchDashboardOverview() {
+  try {
+    const res = await fetch(`${API_BASE}/dashboard/overview`);
+    if (!res.ok) throw new Error('Failed to fetch overview');
+    const data = await res.json();
+    renderOverviewStats(data.today);
+  } catch (e) {
+    console.error(e);
+  }
+}
+
+function renderOverviewStats(stats) {
+  const container = els.overviewStats;
+  container.innerHTML = '';
+  const items = [
+    { label: 'Total Orders', value: stats.total_orders },
+    { label: 'Total Revenue', value: `$${stats.total_revenue.toFixed(2)}` },
+    { label: 'Pending Orders', value: stats.pending_orders },
+    { label: 'Completed Orders', value: stats.completed_orders },
+    { label: 'Avg Order Value', value: `$${stats.average_order_value.toFixed(2)}` },
+  ];
+  for (const item of items) {
+    const div = document.createElement('div');
+    div.className = 'stat-item';
+    div.textContent = `${item.label}: ${item.value}`;
+    container.appendChild(div);
+  }
+}
+
+async function fetchActiveConversations() {
+  try {
+    const res = await fetch(`${API_BASE}/dashboard/conversations?limit=10`);
+    if (!res.ok) throw new Error('Failed to fetch conversations');
+    const data = await res.json();
+    renderConversations(data);
+  } catch (e) {
+    console.error(e);
+  }
+}
+
+function renderConversations(conversations) {
+  const list = els.conversationsList;
+  list.innerHTML = '';
+  for (const conv of conversations) {
+    const li = document.createElement('li');
+    li.textContent = `${conv.last_message_time} - ${conv.last_message} (${conv.message_count} msgs)`;
+    list.appendChild(li);
+  }
+}
+
+async function fetchLiveOrders() {
+  try {
+    const res = await fetch(`${API_BASE}/dashboard/orders/live`);
+    if (!res.ok) throw new Error('Failed to fetch live orders');
+    const data = await res.json();
+    renderLiveOrders(data);
+  } catch (e) {
+    console.error(e);
+  }
+}
+
+function renderLiveOrders(orders) {
+  const list = els.liveOrdersList;
+  list.innerHTML = '';
+  for (const order of orders) {
+    const li = document.createElement('li');
+    li.textContent = `Order #${order.id} - Table ${order.table_id} - ${order.status} - $${order.total.toFixed(2)}`;
+    list.appendChild(li);
+  }
 }
 
 // Fallback UUIDv4
