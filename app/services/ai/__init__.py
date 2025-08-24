@@ -1,10 +1,16 @@
+# app/services/ai/__init__.py
 """
-AI services package.
+AI services package - Central Brain Architecture
 
-Exposes lightweight AI handler.
+Exposes the central AI handler for all chat types.
 """
+from .central_ai_handler import CentralAIHandler, ChatType
+
+# Keep backward compatibility  
 from .simple_ai_handler import SimpleAIHandler
 
 __all__ = [
-    "SimpleAIHandler",
+    "CentralAIHandler", 
+    "ChatType",
+    "SimpleAIHandler",  # For backward compatibility during transition
 ]
