@@ -54,6 +54,10 @@ def get_cors_config():
         "http://127.0.0.1:3000",
         "http://localhost:5173",
         "http://127.0.0.1:5173",
+        "http://localhost:5500",
+        "http://127.0.0.1:5500",
+        "http://localhost:5501",
+        "http://127.0.0.1:5501",
         "https://*.v0.dev",
         "https://v0.dev",
     ]

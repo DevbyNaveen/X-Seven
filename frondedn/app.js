@@ -1068,9 +1068,20 @@ function notify(msg) {
   renderSystem(msg);
 }
 
+// Include JWT bearer token if available for API requests
+function authHeaders(extra = {}) {
+  const headers = { Accept: 'application/json', ...extra };
+  try {
+    const auth = (window.X7Auth && typeof X7Auth.getAuth === 'function') ? X7Auth.getAuth() : null;
+    const token = auth && auth.token;
+    if (token) headers['Authorization'] = `Bearer ${token}`;
+  } catch {}
+  return headers;
+}
+
 async function fetchDashboardOverview() {
   try {
-    const res = await fetch(`${API_BASE}/dashboard/overview`);
+    const res = await fetch(`${API_BASE}/dashboard/overview`, { headers: authHeaders() });
     if (!res.ok) throw new Error('Failed to fetch overview');
     const data = await res.json();
     renderOverviewStats(data.today);
@@ -1099,7 +1110,7 @@ function renderOverviewStats(stats) {
 
 async function fetchActiveConversations() {
   try {
-    const res = await fetch(`${API_BASE}/dashboard/conversations?limit=10`);
+    const res = await fetch(`${API_BASE}/dashboard/conversations?limit=10`, { headers: authHeaders() });
     if (!res.ok) throw new Error('Failed to fetch conversations');
     const data = await res.json();
     renderConversations(data);
@@ -1120,7 +1131,7 @@ function renderConversations(conversations) {
 
 async function fetchLiveOrders() {
   try {
-    const res = await fetch(`${API_BASE}/dashboard/orders/live`);
+    const res = await fetch(`${API_BASE}/dashboard/orders/live`, { headers: authHeaders() });
     if (!res.ok) throw new Error('Failed to fetch live orders');
     const data = await res.json();
     renderLiveOrders(data);

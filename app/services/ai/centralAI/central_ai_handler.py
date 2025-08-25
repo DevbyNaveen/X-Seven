@@ -18,6 +18,7 @@ from groq import Groq
 
 from app.models import Business, MenuItem, Message
 from app.config.settings import settings
+from app.services.ai.dashboardAI.dashboard_ai_handler import DashboardAIHandler
 
 
 class ChatType(str, Enum):
@@ -61,6 +62,17 @@ class CentralAIHandler:
         Main chat method - Let AI work naturally
         """
         try:
+            # For DASHBOARD chat type, use the specialized DashboardAIHandler
+            if chat_type == ChatType.DASHBOARD:
+                dashboard_handler = DashboardAIHandler(self.db, self)
+                return await dashboard_handler.handle_dashboard_request(
+                    message=message,
+                    session_id=session_id,
+                    business_id=context.get("business_id") if context else None,
+                    context=context
+                )
+            
+            # For other chat types, use the existing implementation
             # Build context with real data
             unified_context = await self._build_context(
                 message=message,

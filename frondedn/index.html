@@ -76,12 +76,23 @@
             }
             if (loggedIn) {
               btn.textContent = 'Profile';
+              // Inline helper to determine profile completeness
+              const isProfileComplete = (p) => {
+                if (!p || !p.businessName) return false;
+                const otherKeys = ['website','industry','timezone','contactEmail','contactPhone','hours','welcome','logoDataUrl'];
+                return otherKeys.some(k => {
+                  const v = p[k];
+                  return typeof v === 'string' ? v.trim().length > 0 : !!v;
+                });
+              };
               btn.onclick = () => {
                 const p = X7Auth.getProfile();
                 if (!p || !p.subscriptionPlan) {
                   window.location.href = 'subscription.html';
-                } else {
+                } else if (!isProfileComplete(p)) {
                   window.location.href = 'onboarding.html';
+                } else {
+                  window.location.href = 'dashboard.html';
                 }
               };
             } else {

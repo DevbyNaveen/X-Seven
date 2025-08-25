@@ -1991,11 +1991,16 @@ body.auth-page {
   background: var(--nb-elev-2);
   transition: border-color 0.2s ease, background-color 0.2s ease, transform 0.06s ease;
 }
-.nb-link-card:hover { border-color: var(--nb-accent); }
-.nb-left .nb-link-card.active { 
-  border-color: var(--nb-accent);
-  /* keep a crisp outline and move glow inside the card to avoid overflow past the panel */
-  box-shadow: 0 0 0 1px var(--nb-accent), 0 0 0 6px color-mix(in srgb, var(--nb-accent) 25%, transparent) inset;
+.nb-link-card:hover { border-color: var(--nb-border); box-shadow: 0 0 0 1px var(--nb-accent); }
+.nb-left .nb-link-card { outline: none; }
+.nb-left .nb-link-card:hover { border-color: var(--nb-border); box-shadow: none; }
+.nb-left .nb-link-card:focus { outline: none !important; }
+.nb-left .nb-link-card.active,
+.nb-left .nb-link-card.active:hover,
+.nb-left .nb-link-card.active:focus {
+  border-color: transparent !important;
+  /* show only outer accent outline */
+  box-shadow: 0 0 0 1px var(--nb-accent) !important;
 }
 .nb-link-card:active { transform: translateY(1px); }
 .nb-link-card .stat-icon { color: var(--nb-accent); }
@@ -2016,6 +2021,9 @@ body.auth-page {
 
 /* Ensure muted chevron follows nb theme */
 .nb-left .nb-link-card .muted { color: var(--nb-muted); }
+
+/* Failsafe: suppress placeholder studio output items */
+.nb-studio-output .studio-item { display: none !important; }
 
 /* Overview stats list */
 .nb-overview-stats { display: flex; flex-direction: column; gap: 8px; }

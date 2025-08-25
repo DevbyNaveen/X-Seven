@@ -1,5 +1,40 @@
 (function(){
   // Dashboard UI controller for notebook-style layout
+  // Auth guard: ensure only authenticated and onboarded users can access dashboard
+  try {
+    if (!window.X7Auth || !X7Auth.isLoggedIn || !X7Auth.isLoggedIn()) {
+      window.location.replace('login.html');
+      return;
+    }
+    const profile = (X7Auth.getProfile && X7Auth.getProfile()) || null;
+    function _isProfileComplete(p) {
+      if (!p || !p.businessName) return false;
+      const otherKeys = ['website','industry','timezone','contactEmail','contactPhone','hours','welcome','logoDataUrl'];
+      return otherKeys.some(k => {
+        const v = p[k];
+        return typeof v === 'string' ? v.trim().length > 0 : !!v;
+      });
+    }
+    if (!profile || !profile.subscriptionPlan) {
+      window.location.replace('subscription.html');
+      return;
+    }
+    if (!_isProfileComplete(profile)) {
+      window.location.replace('onboarding.html');
+      return;
+    }
+  } catch (e) {
+    try { window.location.replace('login.html'); } catch {}
+    return;
+  }
+
+  // Dashboard chat interface instance
+  let dashboardChat = null;
+  // Set to store received message IDs to prevent duplicates
+  const receivedMessageIds = new Set();
+  // Map to store message content hashes to prevent content duplicates
+  const receivedMessageHashes = new Map();
+
   const els = {
     tabs: document.querySelectorAll('#centerTabs .nb-tab'),
     centerTitle: document.getElementById('centerTitle'),
@@ -78,12 +113,63 @@
   let sources = readSources();
   // Only allow opening chat when explicitly triggered by user interaction
   let allowChatOpen = false;
+  // Track current expanded page to avoid redundant re-renders
+  let currentCenterKind = null;
   // Menu categories (local persistence)
   const DEFAULT_CATEGORIES = ['Beverages','Appetizers','Main Dishes','Desserts','Specials'];
   let categories = readCategories();
 
   function readSources(){
     try { return JSON.parse(localStorage.getItem('x7_sources')||'[]'); } catch { return []; }
+  }
+
+  // -------- Live Chat (Grid Tiles) --------
+  function initLiveChat(){
+    const grid = document.getElementById('liveChatGrid');
+    if (!grid) return;
+    const chats = Array.isArray(window.liveChats) ? window.liveChats : [];
+    renderLiveChatGrid(chats);
+    // Live updates via custom event: document.dispatchEvent(new CustomEvent('x7:newChat', { detail: chat }))
+    try {
+      if (window._onNewChat) document.removeEventListener('x7:newChat', window._onNewChat);
+    } catch {}
+    window._onNewChat = (e)=>{
+      const chat = e && e.detail;
+      if (!chat) return;
+      const empty = document.getElementById('liveChatEmpty');
+      if (empty) empty.remove();
+      grid.insertAdjacentHTML('afterbegin', createChatCard(chat));
+    };
+    document.addEventListener('x7:newChat', window._onNewChat);
+  }
+
+  function renderLiveChatGrid(chats){
+    const grid = document.getElementById('liveChatGrid');
+    if (!grid) return;
+    if (!chats || chats.length === 0) return;
+    const empty = document.getElementById('liveChatEmpty');
+    if (empty) empty.remove();
+    grid.innerHTML = chats.map(createChatCard).join('');
+  }
+
+  function createChatCard(chat){
+    const id = chat?.id || '#';
+    const name = chat?.customerName || chat?.name || 'Customer';
+    const last = chat?.lastMessage || '';
+    const unread = chat?.unreadCount ? `<span style="background:var(--nb-accent);color:#001; border-radius:10px; padding:0 6px; font-size:11px; font-weight:700;">${chat.unreadCount}</span>` : '';
+    const time = chat?.time || '';
+    return `
+      <div class="nb-card nb-chat-card" style="aspect-ratio:1/1;border-radius:12px;padding:12px;display:flex;flex-direction:column;justify-content:space-between;">
+        <div style="display:flex;gap:8px;align-items:center;justify-content:space-between;">
+          <div style="display:flex;gap:8px;align-items:center;">
+            <i class="fa-regular fa-circle-play" style="color:var(--nb-accent);"></i>
+            <div style="font-weight:700;">${name}</div>
+          </div>
+          ${unread}
+        </div>
+        <div class="small" style="opacity:.85;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${last}</div>
+        <div class="small" style="opacity:.75;display:flex;justify-content:flex-end;">${time}</div>
+      </div>`;
   }
 
   function readCategories(){
@@ -520,11 +606,109 @@
     if (els.waChat) {
       els.waChat.style.display = 'flex';
       setChatHeaderVisible(true);
-      if (!chatInitialized && typeof window.initChat === 'function') {
+      if (!chatInitialized) {
         chatInitialized = true;
-        try { window.initChat(); } catch(e) { console.warn('initChat failed', e); }
+        try { initDashboardChat(); } catch(e) { console.warn('initDashboardChat failed', e); }
       }
     }
+  }
+
+  // -------- Live Orders (Grid Tiles) --------
+  function initLiveOrders(){
+    const grid = document.getElementById('liveOrdersGrid');
+    if (!grid) return;
+    const orders = Array.isArray(window.liveOrders) ? window.liveOrders : [];
+    renderLiveOrdersGrid(orders);
+    // Live updates via custom event: document.dispatchEvent(new CustomEvent('x7:newOrder', { detail: order }))
+    try {
+      if (window._onNewOrder) document.removeEventListener('x7:newOrder', window._onNewOrder);
+    } catch {}
+    window._onNewOrder = (e)=>{
+      const order = e && e.detail;
+      if (!order) return;
+      const empty = document.getElementById('liveOrdersEmpty');
+      if (empty) empty.remove();
+      grid.insertAdjacentHTML('afterbegin', createOrderCard(order));
+    };
+    document.addEventListener('x7:newOrder', window._onNewOrder);
+  }
+
+  function renderLiveOrdersGrid(orders){
+    const grid = document.getElementById('liveOrdersGrid');
+    if (!grid) return;
+    if (!orders || orders.length === 0) return;
+    const empty = document.getElementById('liveOrdersEmpty');
+    if (empty) empty.remove();
+    grid.innerHTML = orders.map(createOrderCard).join('');
+  }
+
+  function createOrderCard(order){
+    const id = order?.id || order?.number || '#';
+    const customer = order?.customerName || order?.customer || 'Customer';
+    const items = (typeof order?.itemsCount === 'number') ? `${order.itemsCount} items` : (order?.items ? `${order.items.length} items` : '—');
+    const total = (order?.total != null) ? `$${order.total}` : '';
+    const time = order?.time || '';
+    return `
+      <div class="nb-card nb-order-card" style="aspect-ratio:1/1;border-radius:12px;padding:12px;display:flex;flex-direction:column;justify-content:space-between;">
+        <div style="display:flex;gap:8px;align-items:center;">
+          <i class="fa-solid fa-receipt" style="color:var(--nb-accent);"></i>
+          <div style="font-weight:700;">#${id}</div>
+        </div>
+        <div class="small" style="opacity:.9;">${customer}</div>
+        <div class="small" style="display:flex;justify-content:space-between;opacity:.75;">
+          <span>${items}</span>
+          <span>${total || time}</span>
+        </div>
+      </div>`;
+  }
+  
+  // -------- Live Reservation (Grid Tiles) --------
+  function initLiveReservation(){
+    const grid = document.getElementById('liveReservationGrid');
+    if (!grid) return;
+    const reservations = Array.isArray(window.liveReservations) ? window.liveReservations : [];
+    renderLiveReservationGrid(reservations);
+    // Live updates via custom event: document.dispatchEvent(new CustomEvent('x7:newReservation', { detail: reservation }))
+    try {
+      if (window._onNewReservation) document.removeEventListener('x7:newReservation', window._onNewReservation);
+    } catch {}
+    window._onNewReservation = (e)=>{
+      const res = e && e.detail;
+      if (!res) return;
+      const empty = document.getElementById('liveReservationEmpty');
+      if (empty) empty.remove();
+      grid.insertAdjacentHTML('afterbegin', createReservationCard(res));
+    };
+    document.addEventListener('x7:newReservation', window._onNewReservation);
+  }
+
+  function renderLiveReservationGrid(reservations){
+    const grid = document.getElementById('liveReservationGrid');
+    if (!grid) return;
+    if (!reservations || reservations.length === 0) return;
+    const empty = document.getElementById('liveReservationEmpty');
+    if (empty) empty.remove();
+    grid.innerHTML = reservations.map(createReservationCard).join('');
+  }
+
+  function createReservationCard(res){
+    const id = res?.id || res?.code || '#';
+    const name = res?.name || res?.customerName || 'Guest';
+    const size = (res?.partySize != null) ? `x${res.partySize}` : '';
+    const time = res?.time || res?.slot || '';
+    const table = res?.table ? `Table ${res.table}` : '';
+    return `
+      <div class="nb-card nb-res-card" style="aspect-ratio:1/1;border-radius:12px;padding:12px;display:flex;flex-direction:column;justify-content:space-between;">
+        <div style="display:flex;gap:8px;align-items:center;">
+          <i class="fa-regular fa-lightbulb" style="color:var(--nb-accent);"></i>
+          <div style="font-weight:700;">${name}</div>
+        </div>
+        <div class="small" style="opacity:.9;display:flex;gap:8px;align-items:center;">
+          <span>${size}</span>
+          <span>${table}</span>
+        </div>
+        <div class="small" style="opacity:.75;display:flex;justify-content:flex-end;">${time}</div>
+      </div>`;
   }
 
   // -------- Center Expanded Pages --------
@@ -547,6 +731,18 @@
     const disp = show ? '' : 'none';
     if (els.toggleSidebarBtn) els.toggleSidebarBtn.style.display = disp;
     if (els.centerChatIcon) els.centerChatIcon.style.display = disp;
+  }
+
+  // Ensure a lightweight fade animation style is present for dynamic swaps
+  function ensureFadeStyle(){
+    if (document.getElementById('nbFadeStyle')) return;
+    const style = document.createElement('style');
+    style.id = 'nbFadeStyle';
+    style.textContent = `
+      @keyframes nbFade { from { opacity: 0 } to { opacity: 1 } }
+      #centerContent #centerDynamic.nb-fade-in { animation: nbFade .18s ease-in; }
+    `;
+    document.head.appendChild(style);
   }
 
   // -------- Menu (All Items) Aggregator --------
@@ -697,6 +893,50 @@
             <button class="btn btn-outline" id="uzMarketingCenter"><i class="fa-regular fa-paper-plane"></i> Marketing</button>
           </div>
         `;
+      case 'liveOrders':
+        return `
+          <div class="nb-section-header">
+            <div class="muted small">Incoming online orders</div>
+          </div>
+          <div id="liveOrdersGrid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:10px;align-items:stretch;">
+            <!-- Each order will render as a rounded square card inside this grid -->
+            <div id="liveOrdersEmpty" class="muted small" style="grid-column:1/-1;opacity:0.7;">No live orders yet</div>
+          </div>
+        `;
+      case 'liveChat':
+        return `
+          <div class="nb-section-header">
+            <div class="muted small">Incoming customer chats</div>
+          </div>
+          <div id="liveChatGrid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:10px;align-items:stretch;">
+            <!-- Each chat will render as a rounded square card inside this grid -->
+            <div id="liveChatEmpty" class="muted small" style="grid-column:1/-1;opacity:0.7;">No active chats yet</div>
+          </div>
+        `;
+      case 'liveReservation':
+        return `
+          <div class="nb-section-header">
+            <div class="muted small">Incoming table reservations</div>
+          </div>
+          <div id="liveReservationGrid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:10px;align-items:stretch;">
+            <!-- Each reservation will render as a rounded square card inside this grid -->
+            <div id="liveReservationEmpty" class="muted small" style="grid-column:1/-1;opacity:0.7;">No upcoming reservations yet</div>
+          </div>
+        `;
+      case 'reports':
+        return `
+          <div class="nb-section-header">
+            <div class="nb-header-title">Reports</div>
+            <div class="muted small">Select type</div>
+          </div>
+          <div class="nb-card" style="display:flex;gap:10px;align-items:flex-start;padding:12px;">
+            <i class="fa-regular fa-clipboard" style="margin-top:2px;color:var(--nb-accent);"></i>
+            <div>
+              <div class="nb-card-title">Reports</div>
+              <div class="nb-card-sub small muted">No report selected</div>
+            </div>
+          </div>
+        `;
       case 'workingHours':
         return `
           <div class="nb-section-header">
@@ -769,17 +1009,64 @@
   function openCenterPage(kind, title){
     showCenterContent();
     setCenterTitle(title);
+    // If the same page kind is requested again, avoid re-render to preserve state
+    if (currentCenterKind === kind) {
+      // Still sync quick status counters on re-open for freshness
+      if (kind === 'quickStatus') {
+        if (els.revCounter && document.getElementById('revCounterBig')) document.getElementById('revCounterBig').textContent = els.revCounter.textContent;
+        if (els.activeOrdersCount && document.getElementById('activeOrdersCountBig')) document.getElementById('activeOrdersCountBig').textContent = els.activeOrdersCount.textContent;
+        if (els.qrScansToday && document.getElementById('qrScansTodayBig')) document.getElementById('qrScansTodayBig').textContent = els.qrScansToday.textContent;
+      }
+      bindCenterPageEvents(kind);
+      return;
+    }
+    ensureFadeStyle();
     const dyn = getDynamicContainer();
-    if (dyn) dyn.innerHTML = renderExpanded(kind);
+    if (dyn) {
+      dyn.innerHTML = renderExpanded(kind);
+      try { dyn.scrollTop = 0; } catch {}
+      try { dyn.classList.remove('nb-fade-in'); void dyn.offsetWidth; dyn.classList.add('nb-fade-in'); } catch {}
+    }
+    if (els.centerContent) { try { els.centerContent.scrollTop = 0; } catch {} }
+    if (kind === 'liveOrders') initLiveOrders();
+    if (kind === 'liveChat') initLiveChat();
+    if (kind === 'liveReservation') initLiveReservation();
     if (kind === 'menuMgmt') initMenuMgmt();
     if (kind === 'menuBrowse') initMenuBrowse();
     if (kind === 'workingHours') initWorkingHours();
+    if (kind === 'reports') initReports();
     // sync big counters from overview if available
     if (kind === 'quickStatus') {
       if (els.revCounter && document.getElementById('revCounterBig')) document.getElementById('revCounterBig').textContent = els.revCounter.textContent;
       if (els.activeOrdersCount && document.getElementById('activeOrdersCountBig')) document.getElementById('activeOrdersCountBig').textContent = els.activeOrdersCount.textContent;
       if (els.qrScansToday && document.getElementById('qrScansTodayBig')) document.getElementById('qrScansTodayBig').textContent = els.qrScansToday.textContent;
     }
+    bindCenterPageEvents(kind);
+    currentCenterKind = kind;
+  }
+
+  function bindCenterPageEvents(kind){
+    try {
+      if (kind === 'qrAssets') {
+        document.getElementById('actBatchMenuQR')?.addEventListener('click', ()=> alert('Generate Menu QR Batch coming soon'));
+      } else if (kind === 'tableMgmt') {
+        document.getElementById('actGenerateTableQR')?.addEventListener('click', ()=> alert('Generate Table QR coming soon'));
+      } else if (kind === 'customerData') {
+        document.getElementById('actImportCustomers')?.addEventListener('click', ()=> alert('CSV Import coming soon'));
+      } else if (kind === 'opsFiles') {
+        document.getElementById('actUploadOps')?.addEventListener('click', ()=> alert('Upload Document coming soon'));
+      } else if (kind === 'uploadZones') {
+        document.getElementById('uzMenuPhotosCenter')?.addEventListener('click', ()=> setCenterTitle('Upload: Menu Photos'));
+        document.getElementById('uzCsvCenter')?.addEventListener('click', ()=> setCenterTitle('Upload: CSV Imports'));
+        document.getElementById('uzReceiptsCenter')?.addEventListener('click', ()=> setCenterTitle('Upload: Receipts/Invoices'));
+        document.getElementById('uzMarketingCenter')?.addEventListener('click', ()=> setCenterTitle('Upload: Marketing'));
+      }
+    } catch {}
+  }
+
+  function initReports(){
+    // Placeholder for future report filters/downloads
+    // e.g., bind dropdowns/date pickers when added
   }
 
   // -------- Working Hours (Weekly Schedule) --------
@@ -842,7 +1129,14 @@
 
   // -------- Live Updates (Overview, Conversations, Orders) --------
   async function fetchJSON(url){
-    const res = await fetch(url);
+    // Include JWT if available
+    let headers = { 'Accept': 'application/json' };
+    try {
+      const auth = (window.X7Auth && typeof X7Auth.getAuth === 'function') ? X7Auth.getAuth() : null;
+      const token = auth && auth.token;
+      if (token) headers['Authorization'] = `Bearer ${token}`;
+    } catch {}
+    const res = await fetch(url, { headers });
     if (!res.ok) throw new Error(`Request failed: ${res.status}`);
     return res.json();
   }
@@ -854,8 +1148,19 @@
         fetchJSON(`${API_BASE}/dashboard/conversations?limit=5`),
         fetchJSON(`${API_BASE}/dashboard/orders/live?limit=5`),
       ]);
-      renderOverview(overview||{});
-      updateQuickStatus(overview||{});
+      // Normalize backend overview shape to UI-expected keys
+      const ov = overview || {};
+      const today = ov && ov.today ? ov.today : {};
+      const normalized = {
+        total_revenue: today.total_revenue ?? 0,
+        // Estimate active orders as non-completed orders for the day
+        active_orders: Math.max(0, (today.total_orders ?? 0) - (today.completed_orders ?? 0)),
+        new_customers: ov.new_customers ?? 0,
+        active_bookings: ov.active_bookings ?? 0,
+        business_status: ov.business_status || 'offline',
+      };
+      renderOverview(normalized);
+      updateQuickStatus(normalized);
       renderConversations(conversations||[]);
       renderOrders(orders||[]);
     } catch (e) {
@@ -908,13 +1213,14 @@
   function renderConversations(list){
     if (!els.conversationsList) return;
     if (!list.length) {
-      els.conversationsList.innerHTML = `<li class="empty-state" style="padding:8px;" ><i class="fas fa-comments"></i> <span class="muted small">No active conversations</span></li>`;
+      els.conversationsList.innerHTML = `<li class="empty-state" style="padding:8px;"><i class="fas fa-comments"></i> <span class="muted small">No active conversations</span></li>`;
       return;
     }
     els.conversationsList.innerHTML = list.map(conv => {
       const name = conv.customer_name || 'Guest';
       const initial = (name[0]||'G').toUpperCase();
-      const time = conv.last_message_at ? new Date(conv.last_message_at).toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'}) : '';
+      const ts = conv.last_message_time || conv.last_message_at || conv.updated_at || conv.created_at;
+      const time = ts ? new Date(ts).toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'}) : '';
       const last = conv.last_message || '';
       return `
         <li class="conversation-item" style="padding:8px;border-bottom:1px solid var(--nb-border);">
@@ -1042,10 +1348,10 @@
       if (softCard) softCard.remove();
       if (els.waChat) {
         els.waChat.style.display = 'flex';
-        // init chat once
-        if (!chatInitialized && typeof window.initChat === 'function') {
+        // init dashboard chat once
+        if (!chatInitialized) {
           chatInitialized = true;
-          try { window.initChat(); } catch(e) { console.warn('initChat failed', e); }
+          try { initDashboardChat(); } catch(e) { console.warn('initDashboardChat failed', e); }
         }
       }
     } else {
@@ -1228,19 +1534,78 @@
 
   function initStudio(){
     if (!els.studioCards) return;
+    // Capture-phase guard: intercept Live Orders click before any bubbling handlers
     els.studioCards.addEventListener('click', (e)=>{
       const card = e.target.closest('.nb-card');
       if (!card) return;
       const tool = card.getAttribute('data-tool');
-      const out = document.querySelector('.nb-studio-output');
-      if (out) {
-        const div = document.createElement('div');
-        div.className = 'studio-item';
-        div.style.cssText = 'margin-top:8px;padding:10px;border:1px solid var(--nb-border);border-radius:8px;background:var(--nb-elev-2)';
-        div.innerHTML = `<strong>${tool}</strong> output added. Connect sources to generate content.`;
-        out.prepend(div);
+      const titleEl = card.querySelector('.nb-card-title');
+      const title = titleEl?.textContent?.trim();
+      const isLiveOrders = (title === 'Live Orders' || tool === 'audio');
+      const isLiveChat = (title === 'Live Chat' || tool === 'video');
+      const isLiveReservation = (title === 'Live Reservation' || tool === 'mindmap');
+      const isReports = (title === 'Reports' || tool === 'reports');
+      if (isLiveOrders || isLiveChat || isLiveReservation || isReports) {
+        e.preventDefault();
+        if (typeof e.stopImmediatePropagation === 'function') e.stopImmediatePropagation();
+        e.stopPropagation();
+        // Failsafe: remove any previously appended studio placeholder items
+        try { document.querySelectorAll('.nb-studio-output .studio-item')?.forEach(n => n.remove()); } catch {}
+        const kind = isLiveOrders ? 'liveOrders' : (isLiveChat ? 'liveChat' : (isLiveReservation ? 'liveReservation' : 'reports'));
+        const pageTitle = isLiveOrders ? 'Incoming online orders' : (isLiveChat ? 'Incoming customer chats' : (isLiveReservation ? 'Incoming table reservations' : 'Reports'));
+        openCenterPage(kind, pageTitle);
+        return;
       }
+    }, true);
+    els.studioCards.addEventListener('click', (e)=>{
+      const card = e.target.closest('.nb-card');
+      if (!card) return;
+      const tool = card.getAttribute('data-tool');
+      const titleEl = card.querySelector('.nb-card-title');
+      const title = titleEl?.textContent?.trim();
+      // Special-case: Open Live Orders view in center panel
+      const isLiveOrders = (title === 'Live Orders' || tool === 'audio');
+      const isLiveChat = (title === 'Live Chat' || tool === 'video');
+      const isLiveReservation = (title === 'Live Reservation' || tool === 'mindmap');
+      const isReports = (title === 'Reports' || tool === 'reports');
+      if (isLiveOrders || isLiveChat || isLiveReservation || isReports) {
+        // Fully suppress studio output item for Live Orders card
+        e.preventDefault();
+        if (typeof e.stopImmediatePropagation === 'function') e.stopImmediatePropagation();
+        e.stopPropagation();
+        const kind = isLiveOrders ? 'liveOrders' : (isLiveChat ? 'liveChat' : (isLiveReservation ? 'liveReservation' : 'reports'));
+        const pageTitle = isLiveOrders ? 'Incoming online orders' : (isLiveChat ? 'Incoming customer chats' : (isLiveReservation ? 'Incoming table reservations' : 'Reports'));
+        openCenterPage(kind, pageTitle);
+        return;
+      }
+      // Disabled: do not append placeholder studio output items for any tool
+      // const out = document.querySelector('.nb-studio-output');
+      // if (out) { /* intentionally no-op */ }
     });
+  }
+
+  // Observe the studio output area and immediately remove any placeholder `.studio-item` nodes
+  function installStudioOutputGuard(){
+    try {
+      const out = document.querySelector('.nb-studio-output');
+      if (!out) return;
+      // Initial cleanup
+      try { out.querySelectorAll('.studio-item')?.forEach(n => n.remove()); } catch {}
+      const obs = new MutationObserver((mutations) => {
+        for (const m of mutations) {
+          if (!m.addedNodes || m.addedNodes.length === 0) continue;
+          m.addedNodes.forEach(node => {
+            try {
+              if (node.nodeType === 1) { // ELEMENT_NODE
+                if (node.classList?.contains('studio-item')) node.remove();
+                node.querySelectorAll?.('.studio-item')?.forEach(n => n.remove());
+              }
+            } catch {}
+          });
+        }
+      });
+      obs.observe(out, { childList: true, subtree: true });
+    } catch {}
   }
 
   function initActions(){
@@ -1397,6 +1762,286 @@
     els.sourceFile?.addEventListener('change', (e)=> handleFiles(e.target.files));
   }
 
+  /**
+   * Initialize the dashboard chat interface
+   * Sets up the DashboardChatInterface and connects event handlers
+   */
+  function initDashboardChat() {
+    // Only initialize once
+    if (dashboardChat) return;
+    
+    // Get business ID from profile
+    const profile = window.X7Auth?.getProfile?.();
+    const businessId = profile?.businessId;
+    
+    if (!businessId) {
+      console.error('No business ID found in profile');
+      return;
+    }
+    
+    // Create dashboard chat interface
+    try {
+      dashboardChat = new DashboardChatInterface(businessId);
+      
+      // Set up event handlers
+      dashboardChat.onMessage = handleDashboardChatMessage;
+      dashboardChat.onConnectionChange = handleDashboardConnectionChange;
+      
+      // Connect WebSocket
+      dashboardChat.connectWebSocket();
+      
+      // Set up UI event handlers
+      setupDashboardChatUI();
+      
+      console.log('Dashboard chat initialized');
+    } catch (error) {
+      console.error('Failed to initialize dashboard chat:', error);
+    }
+  }
+  
+  /**
+   * Handle incoming dashboard chat messages
+   * @param {Object} message - The message object from the chat interface
+   */
+  function handleDashboardChatMessage(message) {
+    console.log('Dashboard chat message:', message);
+    
+    switch (message.type) {
+      case 'word':
+        // Handle word streaming
+        appendWordToCurrentMessage(message.data);
+        break;
+      
+      case 'message':
+        // Handle complete message
+        finalizeCurrentMessage(message.data, message.actions);
+        break;
+      
+      case 'error':
+        // Handle error message
+        displayErrorMessage(message.data);
+        break;
+      
+      default:
+        console.warn('Unknown message type:', message.type);
+        break;
+    }
+  }
+  
+  /**
+   * Handle dashboard chat connection status changes
+   * @param {boolean} connected - Whether the connection is established
+   */
+  function handleDashboardConnectionChange(connected) {
+    const statusDot = document.getElementById('statusDot');
+    if (statusDot) {
+      statusDot.className = connected ? 'status-dot on' : 'status-dot off';
+      statusDot.title = connected ? 'Connected' : 'Disconnected';
+      statusDot.style.background = connected ? '#4caf50' : '#8796a0';
+    }
+    
+    console.log('Dashboard chat connection:', connected ? 'Connected' : 'Disconnected');
+  }
+  
+  /**
+   * Set up UI event handlers for dashboard chat
+   */
+  function setupDashboardChatUI() {
+    // Send button
+    const sendBtn = document.getElementById('sendBtn');
+    if (sendBtn) {
+      sendBtn.addEventListener('click', sendDashboardMessage);
+    }
+    
+    // Input field
+    const input = document.getElementById('input');
+    if (input) {
+      input.addEventListener('keydown', function(e) {
+        if (e.key === 'Enter' && !e.shiftKey) {
+          e.preventDefault();
+          sendDashboardMessage();
+        }
+      });
+    }
+    
+    // New chat button
+    const newChatBtn = document.getElementById('newChatBtn');
+    if (newChatBtn) {
+      newChatBtn.addEventListener('click', startNewDashboardChat);
+    }
+  }
+  
+  /**
+   * Send a message through the dashboard chat interface
+   */
+  function sendDashboardMessage() {
+    const input = document.getElementById('input');
+    if (!input || !dashboardChat) return;
+    
+    const message = input.value.trim();
+    if (!message) return;
+    
+    // Clear input
+    input.value = '';
+    
+    // Add user message to UI
+    addUserMessageToChat(message);
+    
+    // Send message via WebSocket
+    try {
+      dashboardChat.sendWebSocketMessage(message);
+    } catch (error) {
+      console.error('Failed to send message:', error);
+      displayErrorMessage('Failed to send message. Please try again.');
+    }
+  }
+  
+  /**
+   * Start a new dashboard chat session
+   */
+  function startNewDashboardChat() {
+    // Clear chat messages
+    const messagesContainer = document.getElementById('messages');
+    if (messagesContainer) {
+      messagesContainer.innerHTML = '';
+    }
+    
+    // Create new session
+    if (dashboardChat) {
+      dashboardChat.closeWebSocket();
+      dashboardChat = new DashboardChatInterface(dashboardChat.businessId);
+      dashboardChat.onMessage = handleDashboardChatMessage;
+      dashboardChat.onConnectionChange = handleDashboardConnectionChange;
+      dashboardChat.connectWebSocket();
+    }
+    
+    console.log('Started new dashboard chat session');
+  }
+  
+  /**
+   * Add a user message to the chat UI
+   * @param {string} message - The message text
+   */
+  function addUserMessageToChat(message) {
+    const messagesContainer = document.getElementById('messages');
+    if (!messagesContainer) return;
+    
+    const messageElement = document.createElement('div');
+    messageElement.className = 'wa-message user';
+    messageElement.innerHTML = `
+      <div class="wa-message-bubble" style="background:#00a884;color:#0b141a;max-width:80%;margin-left:auto;margin-bottom:12px;padding:8px 12px;border-radius:8px;">
+        <div class="wa-message-text">${escapeHtml(message)}</div>
+      </div>
+    `;
+    
+    messagesContainer.appendChild(messageElement);
+    messagesContainer.scrollTop = messagesContainer.scrollHeight;
+  }
+  
+  /**
+   * Append a word to the current AI message
+   * @param {string} word - The word to append
+   */
+  function appendWordToCurrentMessage(word) {
+    const messagesContainer = document.getElementById('messages');
+    if (!messagesContainer) return;
+    
+    // Find or create the current AI message bubble
+    let currentMessage = messagesContainer.querySelector('.wa-message.ai:last-child');
+    if (!currentMessage) {
+      currentMessage = document.createElement('div');
+      currentMessage.className = 'wa-message ai';
+      currentMessage.innerHTML = `
+        <div class="wa-message-bubble" style="background:var(--nb-elev-2);color:var(--nb-text);max-width:80%;margin-bottom:12px;padding:8px 12px;border-radius:8px;">
+          <div class="wa-message-text"></div>
+        </div>
+      `;
+      messagesContainer.appendChild(currentMessage);
+    }
+    
+    const textElement = currentMessage.querySelector('.wa-message-text');
+    if (textElement) {
+      textElement.textContent += word + ' ';
+      messagesContainer.scrollTop = messagesContainer.scrollHeight;
+    }
+  }
+  
+  /**
+   * Finalize the current AI message with the complete text and actions
+   * @param {string} message - The complete message text
+   * @param {Array} actions - Suggested actions
+   */
+  function finalizeCurrentMessage(message, actions) {
+    const messagesContainer = document.getElementById('messages');
+    if (!messagesContainer) return;
+    
+    // Find the current AI message bubble
+    const currentMessage = messagesContainer.querySelector('.wa-message.ai:last-child');
+    if (currentMessage) {
+      const textElement = currentMessage.querySelector('.wa-message-text');
+      if (textElement) {
+        textElement.textContent = message;
+      }
+      
+      // Add actions if provided
+      if (actions && actions.length > 0) {
+        const actionsContainer = document.createElement('div');
+        actionsContainer.className = 'wa-message-actions';
+        actionsContainer.style.cssText = 'display:flex;gap:8px;flex-wrap:wrap;margin-top:8px;';
+        
+        actions.forEach(action => {
+          const button = document.createElement('button');
+          button.className = 'btn';
+          button.style.cssText = 'padding:6px 10px;border:1px solid var(--nb-border);border-radius:8px;background:var(--nb-elev-2);color:var(--nb-text);';
+          button.textContent = action.label || action.text || action;
+          button.addEventListener('click', () => {
+            const input = document.getElementById('input');
+            if (input) {
+              input.value = action.value || action.text || action;
+              sendDashboardMessage();
+            }
+          });
+          actionsContainer.appendChild(button);
+        });
+        
+        currentMessage.appendChild(actionsContainer);
+      }
+    }
+    
+    messagesContainer.scrollTop = messagesContainer.scrollHeight;
+  }
+  
+  /**
+   * Display an error message in the chat UI
+   * @param {string} errorMessage - The error message to display
+   */
+  function displayErrorMessage(errorMessage) {
+    const messagesContainer = document.getElementById('messages');
+    if (!messagesContainer) return;
+    
+    const messageElement = document.createElement('div');
+    messageElement.className = 'wa-message error';
+    messageElement.innerHTML = `
+      <div class="wa-message-bubble" style="background:#f44336;color:white;max-width:80%;margin-bottom:12px;padding:8px 12px;border-radius:8px;">
+        <div class="wa-message-text">Error: ${escapeHtml(errorMessage)}</div>
+      </div>
+    `;
+    
+    messagesContainer.appendChild(messageElement);
+    messagesContainer.scrollTop = messagesContainer.scrollHeight;
+  }
+  
+  /**
+   * Escape HTML characters for safe display
+   * @param {string} text - The text to escape
+   * @returns {string} The escaped text
+   */
+  function escapeHtml(text) {
+    const div = document.createElement('div');
+    div.textContent = text;
+    return div.innerHTML;
+  }
+
   function initTabs(){
     els.tabs.forEach(btn => btn.addEventListener('click', ()=> {
       if (btn.dataset.view === 'chat') allowChatOpen = true;
@@ -1416,6 +2061,7 @@
     initLeftCards();
     initLeftReorder();
     initSources();
+    installStudioOutputGuard();
     initStudio();
     initLive();
     initTabs();
