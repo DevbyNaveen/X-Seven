@@ -1,0 +1,82 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>X-SevenAI – Login / Sign up</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body class="auth-page">
+  <div class="auth-container">
+    <div class="auth-card">
+      <div class="auth-header">
+        <h1>X-SevenAI</h1>
+        <p class="muted">Welcome back. Sign in to continue, or create a new account.</p>
+      </div>
+
+      <div class="auth-tabs">
+        <button class="auth-tab active" data-mode="login">Login</button>
+        <button class="auth-tab" data-mode="signup">Sign up</button>
+      </div>
+
+      <form id="authForm" class="auth-form" novalidate>
+        <div class="field" data-for="businessName" style="display:none">
+          <label>Business Name</label>
+          <input id="businessName" type="text" placeholder="Acme Inc" autocomplete="organization" />
+        </div>
+        <div class="field" data-for="slugName" style="display:none">
+          <label>Slug Name</label>
+          <input id="slugName" type="text" placeholder="acme-inc" autocomplete="off" />
+        </div>
+        <div class="field" data-for="googleUrl" style="display:none">
+          <label>Google Business URL <span class="muted">(optional)</span></label>
+          <input id="googleUrl" type="url" placeholder="https://g.page/r/xxxx" autocomplete="url" />
+        </div>
+        <div class="field" data-for="locationLink" style="display:none">
+          <label>Location Link</label>
+          <input id="locationLink" type="url" placeholder="https://maps.google.com/?q=..." autocomplete="url" />
+        </div>
+        <div class="field" data-for="category" style="display:none">
+          <label>Category</label>
+          <select id="category">
+            <option value="">Select a category</option>
+            <option>Retail</option>
+            <option>Restaurant</option>
+            <option>Services</option>
+            <option>E-commerce</option>
+            <option>Healthcare</option>
+          </select>
+        </div>
+        <div class="field">
+          <label>Email</label>
+          <input id="email" type="email" placeholder="you@business.com" autocomplete="email" required />
+        </div>
+        <div class="field">
+          <label>Password</label>
+          <input id="password" type="password" placeholder="••••••••" autocomplete="current-password" required />
+        </div>
+        <div class="field" data-for="confirmPassword" style="display:none">
+          <label>Confirm Password</label>
+          <input id="confirmPassword" type="password" placeholder="••••••••" autocomplete="new-password" />
+        </div>
+
+        <button class="btn primary w-100" type="submit">
+          Continue
+        </button>
+
+        <div id="authError" class="form-error" role="alert" style="display:none"></div>
+      </form>
+
+      <div class="auth-footer">
+        <a class="link" href="index.html">Back to chat</a>
+      </div>
+    </div>
+  </div>
+
+  <script src="auth.js"></script>
+  <script src="login.js"></script>
+</body>
+</html>

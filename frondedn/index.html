@@ -19,6 +19,7 @@
             <span id="statusDot" class="status-dot off" title="Disconnected" style="width:10px;height:10px;border-radius:50%;display:inline-block;background:#8796a0"></span>
             <button id="newChatBtn" class="btn btn-outline btn-sm" type="button" title="Start a new chat">New</button>
             <button id="connectBtn" class="btn btn-outline btn-sm" type="button">Connect</button>
+            <button id="authBtn" class="btn btn-outline btn-sm" type="button" title="Login or manage profile">Login</button>
           </div>
         </div>
         <div class="wa-sidebar-controls" style="padding:8px 12px;border-bottom:1px solid #2a2f32;background:#0e171d;display:flex;gap:8px;align-items:center;">
@@ -57,12 +58,38 @@
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     
     <!-- App Scripts -->
+    <script src="auth.js"></script>
     <script src="app.js"></script>
     
     <script>
-      // Initialize chat only
+      // Initialize chat and header auth/profile controls
       document.addEventListener('DOMContentLoaded', function() {
         if (window.initChat) window.initChat();
+        try {
+          const btn = document.getElementById('authBtn');
+          const titleEl = document.querySelector('.wa-title');
+          if (window.X7Auth && btn) {
+            const loggedIn = X7Auth.isLoggedIn();
+            const profile = X7Auth.getProfile();
+            if (profile && profile.businessName && titleEl) {
+              titleEl.textContent = profile.businessName;
+            }
+            if (loggedIn) {
+              btn.textContent = 'Profile';
+              btn.onclick = () => {
+                const p = X7Auth.getProfile();
+                if (!p || !p.subscriptionPlan) {
+                  window.location.href = 'subscription.html';
+                } else {
+                  window.location.href = 'onboarding.html';
+                }
+              };
+            } else {
+              btn.textContent = 'Login';
+              btn.onclick = () => { window.location.href = 'login.html'; };
+            }
+          }
+        } catch {}
       });
     </script>
   </body>

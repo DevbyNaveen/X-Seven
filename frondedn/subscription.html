@@ -1,0 +1,34 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>X-SevenAI – Choose a Plan</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body class="auth-page">
+  <div class="auth-container">
+    <div class="auth-card">
+      <div class="auth-header">
+        <h1>Choose your plan</h1>
+        <p class="muted">Select a plan to continue. You can change it later.</p>
+      </div>
+
+      <div class="plans-grid" id="plansGrid">
+        <!-- Plan cards rendered by subscription.js -->
+      </div>
+
+      <div class="actions-row" style="margin-top:14px; justify-content: space-between;">
+        <a class="link" href="login.html">Back to login</a>
+        <button id="skipPlan" class="btn">Skip for now</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="auth.js"></script>
+  <script src="subscription.js"></script>
+</body>
+</html>

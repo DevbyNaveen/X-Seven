@@ -28,6 +28,10 @@ const els = {
   contactTitle: document.querySelector('.wa-contact'),
   businessIdInput: document.getElementById('businessIdInput'),
   dedicatedBtn: document.getElementById('dedicatedBtn'),
+  dedicatedPane: document.getElementById('dedicatedPane'),
+  toggleSidebarBtn: document.getElementById('toggleSidebarBtn'),
+  waSidebar: document.querySelector('#waChat .wa-sidebar'),
+  waThread: document.querySelector('#waChat .wa-thread'),
   overviewStats: document.getElementById('overviewStats'),
   conversationsList: document.getElementById('conversationsList'),
   liveOrdersList: document.getElementById('liveOrdersList'),
@@ -83,7 +87,7 @@ function createConversation({ isDedicated, businessId, title }) {
   const id = generateSessionId();
   const conv = {
     id,
-    title: title || (isDedicated && businessId ? `Business ${businessId}` : 'Global Chat'),
+    title: title || (isDedicated && businessId ? `Business ${businessId}` : 'Business Owners Chatting'),
     isDedicated: !!isDedicated,
     businessId: isDedicated ? Number(businessId) || null : null,
     sessionId: generateSessionId(),
@@ -102,7 +106,7 @@ function deleteConversation(id) {
   writeConversations(list);
   try { sessionStorage.removeItem(`x7_conv_msgs:${id}`); } catch {}
   if (activeConversationId === id) {
-    const next = list[0] || createConversation({ isDedicated: false, businessId: null, title: 'Global Chat' });
+    const next = list[0] || createConversation({ isDedicated: false, businessId: null, title: 'Business Owners Chatting' });
     setActiveConversation(next.id, { connect: true, render: true });
   } else {
     renderChatList();
@@ -115,6 +119,28 @@ function setActiveConversation(id, opts = {}) {
   try { sessionStorage.setItem(ACTIVE_CONV_KEY, id); } catch {}
   const conv = readConversations().find(c => c.id === id);
   if (!conv) return;
+  // Retroactively derive title for existing conversations with default title
+  try {
+    if (!conv.isDedicated) {
+      const isDefaultTitle = !conv.title || conv.title === 'Business Owners Chatting';
+      if (isDefaultTitle) {
+        const msgs = readConvMessages(conv.id) || [];
+        const firstUser = msgs.find(m => m && m.role === 'user' && typeof m.text === 'string' && m.text.trim().length);
+        if (firstUser) {
+          const derived = deriveTitleFromText(firstUser.text);
+          if (derived) {
+            const list = readConversations();
+            const idx = list.findIndex(c => c.id === conv.id);
+            if (idx >= 0) {
+              list[idx].title = derived;
+              writeConversations(list);
+            }
+            conv.title = derived;
+          }
+        }
+      }
+    }
+  } catch {}
   // Sync global state
   sessionId = conv.sessionId;
   isDedicated = !!conv.isDedicated;
@@ -144,16 +170,25 @@ function renderChatList() {
     row.className = 'wa-chat-item' + (conv.id === activeConversationId ? ' active' : '');
     row.style.cssText = 'padding:12px;border-bottom:1px solid #2a2f32;cursor:pointer;display:flex;align-items:center;gap:8px;';
     const info = document.createElement('div');
-    info.style.cssText = 'flex:1;min-width:0;';
+    info.style.cssText = 'flex:1;min-width:0;max-width:60ch;';
     const name = document.createElement('div');
     name.className = 'wa-chat-name';
-    name.style.fontWeight = '600';
+    name.style.cssText = 'font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:28ch;';
     name.textContent = conv.title;
     const last = document.createElement('div');
     last.className = 'wa-chat-last';
-    last.style.cssText = 'opacity:.7;font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;';
+    // fixed-width, multi-line (2) clamp preview regardless of sidebar width
+    last.style.cssText = 'opacity:.7;font-size:12px;overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;white-space:normal;max-width:50ch;';
     const when = new Date(conv.updatedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-    last.textContent = `${conv.lastMessage || ''} · ${when}`;
+    // Sanitize and clamp preview to fixed length
+    const raw = String(conv.lastMessage || '')
+      .replace(/[\r\n]+/g, ' ')
+      .replace(/\s+/g, ' ')
+      .replace(/[*_`~>#\-]/g, '')
+      .trim();
+    const maxChars = 120;
+    const preview = raw.length > maxChars ? (raw.slice(0, maxChars - 1) + '…') : raw;
+    last.textContent = `${preview} · ${when}`;
     info.appendChild(name);
     info.appendChild(last);
     const del = document.createElement('button');
@@ -178,6 +213,27 @@ function readConvMessages(id) {
 function writeConvMessages(id, msgs) {
   try { sessionStorage.setItem(convMsgsKey(id), JSON.stringify(msgs)); } catch {}
 }
+
+// Derive a short, human-friendly conversation title from the first user message
+function deriveTitleFromText(text) {
+  if (!text) return '';
+  let s = String(text || '').replace(/[\r\n]+/g, ' ').replace(/\s+/g, ' ').trim();
+  // Strip lightweight markdown symbols and code fences
+  s = s.replace(/[`*_~>#]/g, '');
+  // Remove URL schemes
+  s = s.replace(/https?:\/\/\S+/gi, '').trim();
+  // Cut at first sentence end if reasonably long
+  const endIdx = s.search(/[.!?]/);
+  if (endIdx >= 20) s = s.slice(0, endIdx);
+  // Limit to first 8 words for brevity
+  const words = s.split(' ').filter(Boolean);
+  if (words.length > 8) s = words.slice(0, 8).join(' ');
+  // Clamp to 60 chars, add ellipsis if needed
+  if (s.length > 60) s = s.slice(0, 57).trimEnd() + '…';
+  // Capitalize first letter
+  if (s) s = s.charAt(0).toUpperCase() + s.slice(1);
+  return s;
+}
 function addMessageToConversation(convId, role, text) {
   if (!convId || !text) return;
   const msgs = readConvMessages(convId);
@@ -191,6 +247,19 @@ function addMessageToConversation(convId, role, text) {
   if (idx >= 0) {
     list[idx].lastMessage = text;
     list[idx].updatedAt = Date.now();
+    // If this is the first meaningful user message and the title is still default (non-dedicated), derive a topic title
+    if (role === 'user' && !list[idx].isDedicated) {
+      const currentTitle = String(list[idx].title || '');
+      const isDefaultTitle = currentTitle === 'Business Owners Chatting' || currentTitle.trim() === '';
+      if (isDefaultTitle) {
+        const derived = deriveTitleFromText(text);
+        if (derived) {
+          list[idx].title = derived;
+          // Update live header if this is the active conversation
+          try { if (activeConversationId === convId && els.contactTitle) els.contactTitle.textContent = derived; } catch {}
+        }
+      }
+    }
     writeConversations(list);
     renderChatList();
   }
@@ -212,7 +281,7 @@ function loadConversationMessages(convId) {
 function initConversations() {
   conversations = readConversations();
   if (!conversations.length) {
-    const conv = createConversation({ isDedicated: false, businessId: null, title: 'Global Chat' });
+    const conv = createConversation({ isDedicated: false, businessId: null, title: 'Business Owners Chatting' });
     activeConversationId = conv.id;
   }
   try {
@@ -256,8 +325,49 @@ async function init() {
     const savedBiz = localStorage.getItem('x7_business_id');
     if (savedBiz && els.businessIdInput) els.businessIdInput.value = savedBiz;
   } catch {}
+  // Sidebar visibility management
+  function setSidebarVisible(show) {
+    const side = els.waSidebar;
+    const thread = els.waThread;
+    if (!side || !thread) return;
+    if (show) {
+      side.style.display = 'flex';
+      // Responsive but bounded width so list items don't stretch too much
+      // min 260px, target ~32vw, max 420px
+      side.style.flex = '0 0 clamp(260px, 32vw, 420px)';
+      side.style.maxWidth = '420px';
+      side.style.minWidth = '260px';
+      thread.style.flex = '1 1 auto';
+      thread.style.minWidth = '0';
+      if (els.toggleSidebarBtn) {
+        try { els.toggleSidebarBtn.setAttribute('aria-pressed', 'true'); } catch {}
+        try { els.toggleSidebarBtn.title = 'Hide history'; } catch {}
+      }
+      try { localStorage.removeItem('x7_sidebar_hidden'); } catch {}
+    } else {
+      side.style.display = 'none';
+      thread.style.flex = '1 1 100%';
+      thread.style.minWidth = '0';
+      if (els.toggleSidebarBtn) {
+        try { els.toggleSidebarBtn.setAttribute('aria-pressed', 'false'); } catch {}
+        try { els.toggleSidebarBtn.title = 'Show history'; } catch {}
+      }
+      try { localStorage.setItem('x7_sidebar_hidden', '1'); } catch {}
+    }
+  }
   // Initialize conversations list before connecting
   initConversations();
+  // Restore sidebar visibility
+  let sidebarHidden = false;
+  try { sidebarHidden = !!localStorage.getItem('x7_sidebar_hidden'); } catch {}
+  setSidebarVisible(!sidebarHidden);
+  // Toggle handler
+  if (els.toggleSidebarBtn) {
+    els.toggleSidebarBtn.addEventListener('click', () => {
+      const currentlyHidden = els.waSidebar && (els.waSidebar.style.display === 'none' || getComputedStyle(els.waSidebar).display === 'none');
+      setSidebarVisible(currentlyHidden);
+    });
+  }
   if (els.connectBtn) els.connectBtn.addEventListener('click', () => { isDedicated = false; activeBusinessId = null; connectWS(); });
   if (els.newChatBtn) els.newChatBtn.addEventListener('click', newChat);
   if (els.dedicatedBtn) els.dedicatedBtn.addEventListener('click', connectDedicatedWS);
@@ -310,9 +420,11 @@ function ensureStreamBubble() {
   els.messages.scrollTop = els.messages.scrollHeight;
   streamEl = bubble;
   streamLi = li;
-  return streamEl;
   // show caret while typing
   try { streamLi.classList.add('typing'); } catch {}
+  // show checking indicator initially
+  showCheckingIndicator();
+  return streamEl;
 }
 
 function cleanupStreamBubble() {
@@ -322,6 +434,8 @@ function cleanupStreamBubble() {
   streamBuffer = '';
   playbackQueue = [];
   if (streamEl || streamLi) {
+    // Remove checking indicator if any
+    hideCheckingIndicator();
     try { if (streamLi) streamLi.classList.remove('typing'); } catch {}
     // Remove the temporary typing bubble from the DOM to avoid duplicate elements
     try {
@@ -337,6 +451,8 @@ function cleanupStreamBubble() {
 function handleCharStream(chunk) {
   if (!chunk) return;
   ensureStreamBubble();
+  // Once text starts streaming, hide checking indicator
+  hideCheckingIndicator();
   // push incoming characters into playback queue
   for (let i = 0; i < chunk.length; i++) playbackQueue.push(chunk[i]);
   startPlayback();
@@ -346,6 +462,8 @@ function handleCharStream(chunk) {
 function handleWordStream(word) {
   if (word === undefined) return;
   ensureStreamBubble();
+  // Once text starts streaming, hide checking indicator
+  hideCheckingIndicator();
   // push incoming word into playback queue
   playbackQueue.push(word);
   startWordPlayback();
@@ -355,6 +473,37 @@ function startWordPlayback() {
   if (playing) return;
   playing = true;
   scheduleNextWordTick();
+}
+
+// --- Checking indicator helpers ---
+function showCheckingIndicator() {
+  try {
+    if (!streamEl) return;
+    if (streamEl.querySelector('.checking-indicator')) return;
+    const indicator = document.createElement('div');
+    indicator.className = 'checking-indicator';
+    indicator.setAttribute('aria-live', 'polite');
+    indicator.setAttribute('role', 'status');
+    const label = document.createElement('span');
+    label.className = 'checking-label';
+    label.textContent = 'Checking';
+    const d1 = document.createElement('span'); d1.className = 'checking-dot';
+    const d2 = document.createElement('span'); d2.className = 'checking-dot';
+    const d3 = document.createElement('span'); d3.className = 'checking-dot';
+    indicator.appendChild(label);
+    indicator.appendChild(d1);
+    indicator.appendChild(d2);
+    indicator.appendChild(d3);
+    streamEl.appendChild(indicator);
+  } catch {}
+}
+
+function hideCheckingIndicator() {
+  try {
+    if (!streamEl) return;
+    const el = streamEl.querySelector('.checking-indicator');
+    if (el && el.parentNode) el.parentNode.removeChild(el);
+  } catch {}
 }
 
 function scheduleNextWordTick() {
@@ -546,7 +695,7 @@ function newChat() {
   const conv = createConversation({
     isDedicated: !!isDedicated,
     businessId: isDedicated ? activeBusinessId : null,
-    title: isDedicated && activeBusinessId ? `Business ${activeBusinessId}` : 'Global Chat',
+    title: isDedicated && activeBusinessId ? `Business ${activeBusinessId}` : 'Business Owners Chatting',
   });
   setActiveConversation(conv.id, { connect: true, render: true });
   try { if (els.input) els.input.value = ''; } catch {}

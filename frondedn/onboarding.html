@@ -1,0 +1,96 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>X-SevenAI – Business Onboarding</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body class="auth-page">
+  <div class="auth-container">
+    <div class="auth-card">
+      <div class="auth-header">
+        <h1>Business Onboarding</h1>
+        <p class="muted">Tell us about your business so we can tailor your AI assistant.</p>
+      </div>
+
+      <form id="onboardForm" class="auth-form" novalidate>
+        <div class="grid-2">
+          <div class="field">
+            <label>Business Name</label>
+            <input id="bizName" type="text" placeholder="Acme Inc" required />
+          </div>
+          <div class="field">
+            <label>Website</label>
+            <input id="website" type="url" placeholder="https://acme.com" />
+          </div>
+        </div>
+
+        <div class="grid-2">
+          <div class="field">
+            <label>Industry</label>
+            <select id="industry">
+              <option value="">Select industry</option>
+              <option>Retail</option>
+              <option>Restaurant</option>
+              <option>Services</option>
+              <option>E-commerce</option>
+              <option>Healthcare</option>
+              <option>Other</option>
+            </select>
+          </div>
+          <div class="field">
+            <label>Timezone</label>
+            <input id="timezone" type="text" placeholder="e.g. Europe/London" />
+          </div>
+        </div>
+
+        <div class="grid-2">
+          <div class="field">
+            <label>Contact Email</label>
+            <input id="contactEmail" type="email" placeholder="support@acme.com" />
+          </div>
+          <div class="field">
+            <label>Contact Phone</label>
+            <input id="contactPhone" type="tel" placeholder="+1 555 555 5555" />
+          </div>
+        </div>
+
+        <div class="field">
+          <label>Operating Hours</label>
+          <input id="hours" type="text" placeholder="Mon-Fri 9:00–17:00" />
+        </div>
+
+        <div class="field">
+          <label>Welcome Message</label>
+          <textarea id="welcome" rows="3" placeholder="Hi! How can we help today?"></textarea>
+        </div>
+
+        <div class="field">
+          <label>Logo (optional)</label>
+          <input id="logo" type="file" accept="image/*" />
+        </div>
+
+        <div id="onboardError" class="form-error" role="alert" style="display:none"></div>
+
+        <div class="actions-row">
+          <button class="btn" type="button" id="skipBtn">Skip for now</button>
+          <button class="btn primary" type="submit">Save and continue</button>
+        </div>
+      </form>
+
+      <div class="auth-footer">
+        <a class="link" href="index.html">Back to chat</a>
+        <span style="margin:0 8px;color:var(--muted)">•</span>
+        <a class="link" href="#" id="logoutLink">Logout</a>
+      </div>
+    </div>
+  </div>
+
+  <script src="auth.js"></script>
+  <script src="onboarding.js"></script>
+</body>
+</html>
