@@ -3,7 +3,7 @@
   // Auth guard: ensure only authenticated and onboarded users can access dashboard
   try {
     if (!window.X7Auth || !X7Auth.isLoggedIn || !X7Auth.isLoggedIn()) {
-      window.location.replace('auth.html');
+      window.location.replace('../auth.html');
       return;
     }
     const profile = (X7Auth.getProfile && X7Auth.getProfile()) || null;
@@ -16,15 +16,15 @@
       });
     }
     if (!profile || !profile.subscriptionPlan) {
-      window.location.replace('subscription.html');
+      window.location.replace('../subscription.html');
       return;
     }
     if (!_isProfileComplete(profile)) {
-      window.location.replace('onboarding.html');
+      window.location.replace('../onboarding.html');
       return;
     }
   } catch (e) {
-    try { window.location.replace('auth.html'); } catch {}
+    try { window.location.replace('../auth.html'); } catch {}
     return;
   }
 
@@ -1518,7 +1518,7 @@
       profileBtn.innerHTML = '<i class="fa-regular fa-user"></i> <span>Profile & Settings</span>';
       profileBtn.onmouseover = function(){ eval(btnHover); };
       profileBtn.onmouseout = function(){ eval(btnOut); };
-      profileBtn.addEventListener('click', ()=> { window.location.href = 'onboarding.html'; });
+      profileBtn.addEventListener('click', ()=> { window.location.href = '../onboarding.html'; });
       menu.appendChild(profileBtn);
 
       const subBtn = document.createElement('button');
@@ -1526,7 +1526,7 @@
       subBtn.innerHTML = '<i class="fa-regular fa-credit-card"></i> <span>Subscription</span>';
       subBtn.onmouseover = function(){ eval(btnHover); };
       subBtn.onmouseout = function(){ eval(btnOut); };
-      subBtn.addEventListener('click', ()=> { window.location.href = 'subscription.html'; });
+      subBtn.addEventListener('click', ()=> { window.location.href = '../subscription.html'; });
       menu.appendChild(subBtn);
 
       const hr = document.createElement('div');
@@ -1546,7 +1546,7 @@
       loginBtn.innerHTML = '<i class="fa-solid fa-right-to-bracket"></i> <span>Login</span>';
       loginBtn.onmouseover = function(){ eval(btnHover); };
       loginBtn.onmouseout = function(){ eval(btnOut); };
-      loginBtn.addEventListener('click', ()=> { window.location.href = 'auth.html'; });
+      loginBtn.addEventListener('click', ()=> { window.location.href = '../auth.html'; });
       menu.appendChild(loginBtn);
     }
 

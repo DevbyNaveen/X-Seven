@@ -7,11 +7,9 @@ from app.api.v1.endpoints import (
     tables,
     orders,
     dashboard,
-    central_chat_endpoints as simple_chat,
+    central_chat_endpoints as central_chat,
     global_chat_endpoints as global_chat,
-    dedicated_chat_endpoints as dedicated_chat,
 )
-from app.api.v1.endpoints import simple_business_endpoints as simple_business
 
 # Create main router
 api_router = APIRouter()
@@ -54,26 +52,15 @@ api_router.include_router(
 )
 
 api_router.include_router(
-    simple_chat.router,
+    central_chat.router,
     prefix="/chat",
-    tags=["Simple Chat"]
+    tags=["Central Chat"]
 )
 
 api_router.include_router(
     global_chat.router,
-    prefix="/global-chat",
+    prefix="/global",
     tags=["Global Chat"]
 )
 
-api_router.include_router(
-    dedicated_chat.router,
-    prefix="/dedicated-chat",
-    tags=["Dedicated Chat"]
-)
 
-# Simple business listing endpoints (for verification/testing)
-api_router.include_router(
-    simple_business.router,
-    prefix="/simple",
-    tags=["Simple"]
-)

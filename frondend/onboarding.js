@@ -67,7 +67,7 @@
       const existing = (X7Auth.getProfile && X7Auth.getProfile()) || {};
       X7Auth.setProfile({ ...existing, ...profile });
       // After onboarding, proceed to dashboard
-      window.location.href = 'dashboard.html';
+      window.location.href = 'Fdashboard/dashboard.html';
     } catch (e) {
       if (err) { err.textContent = 'Failed to save profile. Please try again.'; err.style.display = 'block'; }
     }
@@ -84,7 +84,7 @@
     requireAuth();
     loadProfileIntoForm();
     if (form) form.addEventListener('submit', handleSubmit);
-    if (skipBtn) skipBtn.addEventListener('click', function(){ window.location.href = 'dashboard.html'; });
+    if (skipBtn) skipBtn.addEventListener('click', function(){ window.location.href = 'Fdashboard/dashboard.html'; });
     if (logoutLink) logoutLink.addEventListener('click', function(e){
       e.preventDefault();
       try { if (window.X7Auth && X7Auth.clearAuth) X7Auth.clearAuth(); } catch {}

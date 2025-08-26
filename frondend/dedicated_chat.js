@@ -82,22 +82,22 @@ class DedicatedChatInterface {
    */
   async initializeSession() {
     try {
-      const response = await x7Fetch(`${this.apiBase}/dedicated-chat/business/${this.businessId}/initialize`, {
+      // Use central chat dedicated endpoint to initialize context with a benign message
+      const response = await x7Fetch(`${this.apiBase}/chat/dedicated/${this.businessId}`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
           session_id: this.sessionId,
-          entry_point: this.entryPoint,
-          table_id: this.tableId,
+          message: 'initialize',
+          context: { entry_point: this.entryPoint, table_id: this.tableId },
         }),
       });
-      
       if (!response.ok) {
         throw new Error(`HTTP error! status: ${response.status}`);
       }
-      
+      // We don't need the response content for UI initialization
       return await response.json();
     } catch (error) {
       console.error('Error initializing dedicated chat session:', error);
@@ -113,7 +113,7 @@ class DedicatedChatInterface {
    */
   async sendMessage(message, stream = true) {
     try {
-      const response = await x7Fetch(`${this.apiBase}/dedicated-chat/business/${this.businessId}`, {
+      const response = await x7Fetch(`${this.apiBase}/chat/dedicated/${this.businessId}`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -122,6 +122,7 @@ class DedicatedChatInterface {
           message: message,
           session_id: this.sessionId,
           stream: stream,
+          context: { entry_point: this.entryPoint, table_id: this.tableId },
         }),
       });
       
@@ -155,8 +156,8 @@ class DedicatedChatInterface {
       const wsScheme = url.protocol === 'https:' ? 'wss' : 'ws';
       const origin = `${wsScheme}://${url.host}`;
       
-      // Build WebSocket URL with entry point and table ID as query parameters
-      let wsUrl = `${origin}/api/v1/dedicated-chat/ws/business/${this.businessId}/${this.sessionId}`;
+      // Build WebSocket URL with entry point and table ID as query parameters (central chat route)
+      let wsUrl = `${origin}/api/v1/chat/ws/dedicated/${this.businessId}/${this.sessionId}`;
       const queryParams = [];
       if (this.entryPoint) queryParams.push(`entry_point=${encodeURIComponent(this.entryPoint)}`);
       if (this.tableId) queryParams.push(`table_id=${encodeURIComponent(this.tableId)}`);
@@ -342,18 +343,9 @@ class DedicatedChatInterface {
    * @returns {Promise<Object>} Business context data
    */
   async fetchBusinessContext() {
-    try {
-      const response = await x7Fetch(`${this.apiBase}/dedicated-chat/business/${this.businessId}/context?session_id=${encodeURIComponent(this.sessionId)}`);
-      
-      if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`);
-      }
-      
-      return await response.json();
-    } catch (error) {
-      console.error('Error fetching business context:', error);
-      throw error;
-    }
+    // No equivalent endpoint is currently exposed under central chat; return empty context.
+    try { console.warn('fetchBusinessContext is not supported via central chat API; returning empty context'); } catch {}
+    return {};
   }
   
   // Fallback UUIDv4

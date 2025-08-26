@@ -755,10 +755,10 @@ function connectWS() {
     ? deriveDedicatedSessionId(sessionId, activeBusinessId)
     : sessionId;
   if (isDedicated && activeBusinessId) {
-    path = `/api/v1/dedicated-chat/ws/business/${activeBusinessId}/${effectiveSessionId}`;
+    path = `/api/v1/chat/ws/dedicated/${activeBusinessId}/${effectiveSessionId}`;
   } else {
     // Default to global chat
-    path = `/api/v1/global-chat/ws/${effectiveSessionId}`;
+    path = `/api/v1/chat/ws/global/${effectiveSessionId}`;
   }
 
   const wsUrl = origin + path;
@@ -991,7 +991,7 @@ async function onSend() {
 async function sendViaHttp(text) {
   try {
     // Route message based on chat mode
-    let url = `${API_BASE}/global-chat`;
+    let url = `${API_BASE}/chat/message`;
     const context = { channel: 'web' };
     let effectiveSessionId = sessionId;
     if (isDedicated) {
@@ -999,7 +999,7 @@ async function sendViaHttp(text) {
         renderSystem('No Business ID set for dedicated chat. Enter a numeric ID and press Dedicated.');
         return;
       }
-      url = `${API_BASE}/dedicated-chat/business/${activeBusinessId}`;
+      url = `${API_BASE}/chat/dedicated/${activeBusinessId}`;
       context.entry_point = 'direct';
       effectiveSessionId = deriveDedicatedSessionId(sessionId, activeBusinessId);
     }

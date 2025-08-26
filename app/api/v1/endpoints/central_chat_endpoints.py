@@ -1,6 +1,6 @@
-# app/api/v1/endpoints/simple_chat_endpoints.py
+# app/api/v1/endpoints/central_chat_endpoints.py
 """
-Updated Simple Chat Endpoints using Central AI Brain
+Update Central Chat Endpoints using Central AI Brain
 Handles all chat types through the central handler
 """
 from __future__ import annotations

@@ -170,7 +170,7 @@
       });
       
       // Redirect to dashboard
-      window.location.href = 'dashboard.html';
+      window.location.href = 'Fdashboard/dashboard.html';
     } catch (error) {
       console.error('Registration error:', error);
       showError(error.message);
@@ -227,7 +227,7 @@
       }
       
       // Redirect to dashboard
-      window.location.href = 'dashboard.html';
+      window.location.href = 'Fdashboard/dashboard.html';
     } catch (error) {
       showError(error.message);
     }
@@ -244,7 +244,7 @@
   // Check if already authenticated
   document.addEventListener('DOMContentLoaded', () => {
     if (X7Auth.isLoggedIn()) {
-      window.location.href = 'dashboard.html';
+      window.location.href = 'Fdashboard/dashboard.html';
     }
   });
 })();
