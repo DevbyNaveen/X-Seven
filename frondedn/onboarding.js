@@ -75,8 +75,8 @@
 
   function requireAuth(){
     if (!(window.X7Auth && X7Auth.isLoggedIn && X7Auth.isLoggedIn())) {
-      // Redirect to login if not authenticated
-      window.location.href = 'login.html';
+      // Redirect to auth if not authenticated
+      window.location.href = 'auth.html';
     }
   }
 
@@ -88,7 +88,7 @@
     if (logoutLink) logoutLink.addEventListener('click', function(e){
       e.preventDefault();
       try { if (window.X7Auth && X7Auth.clearAuth) X7Auth.clearAuth(); } catch {}
-      window.location.href = 'login.html';
+      window.location.href = 'auth.html';
     });
   });
 })();

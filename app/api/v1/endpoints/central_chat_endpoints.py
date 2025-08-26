@@ -6,7 +6,7 @@ Handles all chat types through the central handler
 from __future__ import annotations
 
 from typing import Dict, Any
-from fastapi import APIRouter, Depends, WebSocket, WebSocketDisconnect
+from fastapi import APIRouter, Depends, WebSocket, WebSocketDisconnect, HTTPException, status
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 import json
@@ -15,6 +15,8 @@ import asyncio
 
 from app.config.database import get_db
 from app.services.ai import CentralAIHandler, ChatType
+from app.core.dependencies import get_current_business, get_current_user
+from app.models import Message, Business, User
 
 router = APIRouter()
 
@@ -47,6 +49,40 @@ async def global_chat(request: Dict[str, Any], db: Session = Depends(get_db)):
         "success": response.get("success", True),
         "chat_type": "global",
         "suggested_actions": [],
+    }
+
+
+@router.delete("/dashboard/{business_id}/{session_id}")
+async def delete_dashboard_conversation(
+    business_id: int,
+    session_id: str,
+    db: Session = Depends(get_db),
+    business: Business = Depends(get_current_business),
+    current_user: User = Depends(get_current_user),
+) -> Dict[str, Any]:
+    """Delete all messages for a dashboard chat session scoped to a business.
+
+    Secured: requires authenticated user and that user's business matches the path business_id.
+    """
+    # Ensure the authenticated user's business matches the requested business_id
+    if business.id != business_id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Not authorized to modify this business's conversations",
+        )
+
+    # Delete messages for this session and business
+    deleted = db.query(Message).filter(
+        Message.session_id == session_id,
+        Message.business_id == business_id,
+    ).delete(synchronize_session=False)
+    db.commit()
+
+    return {
+        "status": "success",
+        "deleted": deleted,
+        "session_id": session_id,
+        "business_id": business_id,
     }
 
 

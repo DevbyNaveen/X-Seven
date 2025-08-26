@@ -160,10 +160,15 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
         
         # Add security headers
         response.headers["X-Content-Type-Options"] = "nosniff"
-        response.headers["X-Frame-Options"] = "DENY"
         response.headers["X-XSS-Protection"] = "1; mode=block"
         response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
         response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
+        if settings.ENVIRONMENT.lower() == "production":
+            response.headers["X-Frame-Options"] = "DENY"
+        else:
+            response.headers["Content-Security-Policy"] = (
+                "frame-ancestors 'self' http://localhost:* http://127.0.0.1:*"
+            )
         
         return response
 

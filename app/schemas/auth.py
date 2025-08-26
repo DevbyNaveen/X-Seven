@@ -48,6 +48,7 @@ class Token(BaseModel):
     token_type: str
     business_id: int
     user_role: UserRole
+    refresh_token: Optional[str] = None
 
     class Config:
         json_schema_extra = {
@@ -55,6 +56,19 @@ class Token(BaseModel):
                 "access_token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
                 "token_type": "bearer",
                 "business_id": 1,
-                "user_role": "owner"
+                "user_role": "owner",
+                "refresh_token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
+            }
+        }
+
+
+class RefreshRequest(BaseModel):
+    """Request schema for token refresh."""
+    refresh_token: str
+
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "refresh_token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
             }
         }

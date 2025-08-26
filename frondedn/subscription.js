@@ -37,7 +37,7 @@
 
   function requireAuth(){
     if (!(window.X7Auth && X7Auth.isLoggedIn && X7Auth.isLoggedIn())) {
-      window.location.href = 'login.html';
+      window.location.href = 'auth.html';
     }
   }
 

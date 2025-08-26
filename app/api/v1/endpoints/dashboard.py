@@ -15,7 +15,8 @@ router = APIRouter()
 @router.get("/overview")
 async def get_dashboard_overview(
     db: Session = Depends(get_db),
-    business: Business = Depends(get_current_business)
+    business: Business = Depends(get_current_business),
+    current_user: User = Depends(get_current_user)  # Add this dependency
 ) -> Any:
     """Get dashboard overview statistics."""
     today = datetime.utcnow().date()
@@ -55,7 +56,8 @@ async def get_dashboard_overview(
 async def get_active_conversations(
     limit: int = 20,
     db: Session = Depends(get_db),
-    business: Business = Depends(get_current_business)
+    business: Business = Depends(get_current_business),
+    current_user: User = Depends(get_current_user)  # Add this dependency
 ) -> List[Dict[str, Any]]:
     """Get active customer conversations."""
 
@@ -153,7 +155,8 @@ async def dashboard_websocket(
 @router.get("/orders/live")
 async def get_live_orders(
     db: Session = Depends(get_db),
-    business: Business = Depends(get_current_business)
+    business: Business = Depends(get_current_business),
+    current_user: User = Depends(get_current_user)  # Add this dependency
 ) -> List[Dict[str, Any]]:
     """Get live order feed."""
     active_statuses = [

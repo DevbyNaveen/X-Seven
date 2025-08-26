@@ -121,8 +121,14 @@ function setActiveConversation(id, opts = {}) {
   if (!conv) return;
   // Retroactively derive title for existing conversations with default title
   try {
-    if (!conv.isDedicated) {
-      const isDefaultTitle = !conv.title || conv.title === 'Business Owners Chatting';
+    // In dashboard mode, allow derivation even for dedicated conversations
+    const allowDerive = (typeof window !== 'undefined' && window.USE_DASHBOARD_CHAT) || !conv.isDedicated;
+    if (allowDerive) {
+      const isBusinessNum = /^Business\s+\d+$/i.test(String(conv.title || ''));
+      const isDefaultTitle = !conv.title || conv.title === 'Business Owners Chatting' || (
+        (typeof window !== 'undefined' && window.USE_DASHBOARD_CHAT) &&
+        (isBusinessNum || (conv.businessId != null && String(conv.title).trim() === `Business ${conv.businessId}`))
+      );
       if (isDefaultTitle) {
         const msgs = readConvMessages(conv.id) || [];
         const firstUser = msgs.find(m => m && m.role === 'user' && typeof m.text === 'string' && m.text.trim().length);
@@ -136,6 +142,8 @@ function setActiveConversation(id, opts = {}) {
               writeConversations(list);
             }
             conv.title = derived;
+            // Notify other UIs (e.g., dashboard header) about title update
+            try { document.dispatchEvent(new CustomEvent('x7:conversationTitleChanged', { detail: { id: conv.id, title: derived } })); } catch {}
           }
         }
       }
@@ -157,7 +165,8 @@ function setActiveConversation(id, opts = {}) {
   const loaded = loadConversationMessages(conv.id);
   // put cursor in the composer
   try { if (els.input) els.input.focus(); } catch {}
-  if (connect) connectWS();
+  const useDashboard = !!(typeof window !== 'undefined' && window.USE_DASHBOARD_CHAT);
+  if (connect && !useDashboard) connectWS();
 }
 
 function renderChatList() {
@@ -247,16 +256,23 @@ function addMessageToConversation(convId, role, text) {
   if (idx >= 0) {
     list[idx].lastMessage = text;
     list[idx].updatedAt = Date.now();
-    // If this is the first meaningful user message and the title is still default (non-dedicated), derive a topic title
-    if (role === 'user' && !list[idx].isDedicated) {
+    // If this is the first meaningful user message and the title is still default,
+    // derive a topic title. In dashboard mode, do this even for dedicated convs.
+    if (role === 'user' && ((typeof window !== 'undefined' && window.USE_DASHBOARD_CHAT) || !list[idx].isDedicated)) {
       const currentTitle = String(list[idx].title || '');
-      const isDefaultTitle = currentTitle === 'Business Owners Chatting' || currentTitle.trim() === '';
+      const isBusinessNum = /^Business\s+\d+$/i.test(currentTitle);
+      const isDefaultTitle = currentTitle === 'Business Owners Chatting' || currentTitle.trim() === '' || (
+        (typeof window !== 'undefined' && window.USE_DASHBOARD_CHAT) &&
+        (isBusinessNum || (list[idx].businessId != null && currentTitle.trim() === `Business ${list[idx].businessId}`))
+      );
       if (isDefaultTitle) {
         const derived = deriveTitleFromText(text);
         if (derived) {
           list[idx].title = derived;
           // Update live header if this is the active conversation
           try { if (activeConversationId === convId && els.contactTitle) els.contactTitle.textContent = derived; } catch {}
+          // Notify other UIs (e.g., dashboard header) about title update
+          try { document.dispatchEvent(new CustomEvent('x7:conversationTitleChanged', { detail: { id: convId, title: derived } })); } catch {}
         }
       }
     }
@@ -313,7 +329,30 @@ if (window.marked) {
   } catch {}
 }
 
+// Expose conversation helpers for dashboard integration
+// This allows dashboard-ui.js to create/set conversations and update the sidebar
+try {
+  window.X7Chat = window.X7Chat || {};
+  // Storage helpers
+  window.X7Chat.readConversations = readConversations;
+  window.X7Chat.writeConversations = writeConversations;
+  window.X7Chat.readConvMessages = readConvMessages;
+  // Conversation actions
+  window.X7Chat.createConversation = createConversation;
+  window.X7Chat.setActiveConversation = function(id, opts = {}) {
+    // Force connect=false in dashboard mode; rendering remains true by default
+    const useDashboard = !!(typeof window !== 'undefined' && window.USE_DASHBOARD_CHAT);
+    const options = { ...opts };
+    if (useDashboard) options.connect = false;
+    return setActiveConversation(id, options);
+  };
+  window.X7Chat.addMessageToConversation = addMessageToConversation;
+  window.X7Chat.getActiveConversationId = function() { return activeConversationId; };
+  window.X7Chat.renderChatList = renderChatList;
+} catch {}
+
 async function init() {
+  const useDashboard = !!(typeof window !== 'undefined' && window.USE_DASHBOARD_CHAT);
   // Show disconnected status until WS connects
   try { setConnStatus(false); } catch {}
   // Ensure API base points to a live backend
@@ -368,9 +407,11 @@ async function init() {
       setSidebarVisible(currentlyHidden);
     });
   }
-  if (els.connectBtn) els.connectBtn.addEventListener('click', () => { isDedicated = false; activeBusinessId = null; connectWS(); });
-  if (els.newChatBtn) els.newChatBtn.addEventListener('click', newChat);
-  if (els.dedicatedBtn) els.dedicatedBtn.addEventListener('click', connectDedicatedWS);
+  if (!useDashboard) {
+    if (els.connectBtn) els.connectBtn.addEventListener('click', () => { isDedicated = false; activeBusinessId = null; connectWS(); });
+    if (els.newChatBtn) els.newChatBtn.addEventListener('click', newChat);
+    if (els.dedicatedBtn) els.dedicatedBtn.addEventListener('click', connectDedicatedWS);
+  }
   if (els.businessIdInput) {
     els.businessIdInput.addEventListener('input', () => {
       try { localStorage.setItem('x7_business_id', els.businessIdInput.value || ''); } catch {}
@@ -379,18 +420,20 @@ async function init() {
       if (e.key === 'Enter') { e.preventDefault(); connectDedicatedWS(); }
     });
   }
-  if (els.send) els.send.addEventListener('click', onSend);
-  if (els.input) {
-    els.input.addEventListener('keydown', (e) => {
-      if (e.key === 'Enter' && !e.shiftKey) {
-        e.preventDefault();
-        onSend();
-      }
-    });
+  if (!useDashboard) {
+    if (els.send) els.send.addEventListener('click', onSend);
+    if (els.input) {
+      els.input.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter' && !e.shiftKey) {
+          e.preventDefault();
+          onSend();
+        }
+      });
+    }
   }
 
-  // Auto-connect on load
-  connectWS();
+  // Auto-connect on load (disabled when dashboard manages its own WS)
+  if (!useDashboard) connectWS();
 
   // Initial fetch (only if containers exist)
   if (els.overviewStats) fetchDashboardOverview();
@@ -839,6 +882,11 @@ function connectWS() {
 }
 
 function connectDedicatedWS() {
+  const useDashboard = !!(typeof window !== 'undefined' && window.USE_DASHBOARD_CHAT);
+  if (useDashboard) {
+    // Dashboard manages its own WebSocket via DashboardChatInterface
+    return;
+  }
   // Read business ID from UI
   const raw = (els.businessIdInput && els.businessIdInput.value || '').trim();
   if (!raw) {
@@ -957,7 +1005,7 @@ async function sendViaHttp(text) {
     }
     const body = { message: text, session_id: effectiveSessionId, context };
 
-    const res = await fetch(url, {
+    const res = await x7Fetch(url, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body),
@@ -1073,15 +1121,93 @@ function authHeaders(extra = {}) {
   const headers = { Accept: 'application/json', ...extra };
   try {
     const auth = (window.X7Auth && typeof X7Auth.getAuth === 'function') ? X7Auth.getAuth() : null;
-    const token = auth && auth.token;
+    let token = auth && auth.token;
+    if (!token) {
+      try {
+        const raw = localStorage.getItem('x7_auth');
+        if (raw) {
+          const parsed = JSON.parse(raw);
+          token = parsed && parsed.token;
+        }
+      } catch {}
+    }
     if (token) headers['Authorization'] = `Bearer ${token}`;
   } catch {}
   return headers;
 }
 
+// Global fetch wrapper with automatic JWT refresh and retry
+async function x7Fetch(input, init = {}) {
+  const attempt = () => {
+    const headers = new Headers(init.headers || {});
+    if (!headers.has('Accept')) headers.set('Accept', 'application/json');
+    try {
+      const auth = (window.X7Auth && typeof X7Auth.getAuth === 'function') ? X7Auth.getAuth() : null;
+      const token = auth && auth.token;
+      if (token) headers.set('Authorization', `Bearer ${token}`);
+      else headers.delete('Authorization');
+    } catch {}
+    return fetch(input, { ...init, headers });
+  };
+
+  let res = await attempt();
+  if (res.status !== 401) return res;
+
+  try {
+    const auth = (window.X7Auth && typeof X7Auth.getAuth === 'function') ? X7Auth.getAuth() : null;
+    const refreshToken = auth && auth.refreshToken;
+    if (!refreshToken) throw new Error('No refresh token');
+    await refreshTokens(refreshToken);
+  } catch (e) {
+    try { if (window.X7Auth && typeof X7Auth.clearAuth === 'function') X7Auth.clearAuth(); } catch {}
+    return res;
+  }
+
+  return attempt();
+}
+
+async function refreshTokens(refreshToken) {
+  if (!refreshToken) throw new Error('No refresh token');
+  if (window.__x7_refresh_inflight) return window.__x7_refresh_inflight;
+
+  const p = (async () => {
+    try {
+      const resp = await fetch(`${API_BASE}/auth/refresh`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+        body: JSON.stringify({ refresh_token: refreshToken })
+      });
+      if (!resp.ok) throw new Error(`Refresh failed: ${resp.status}`);
+      const data = await resp.json();
+      let current = null;
+      try { current = (window.X7Auth && X7Auth.getAuth && X7Auth.getAuth()) || null; } catch {}
+      const updated = {
+        ...(current || {}),
+        token: data.access_token,
+        refreshToken: data.refresh_token,
+        businessId: (data.business_id !== undefined ? data.business_id : (current && current.businessId)),
+        userRole: (data.user_role !== undefined ? data.user_role : (current && current.userRole)),
+        createdAt: Date.now(),
+      };
+      try {
+        if (window.X7Auth && typeof X7Auth.setAuth === 'function') X7Auth.setAuth(updated);
+        else localStorage.setItem('x7_auth', JSON.stringify(updated));
+      } catch {}
+      return updated;
+    } finally {
+      window.__x7_refresh_inflight = null;
+    }
+  })();
+  window.__x7_refresh_inflight = p;
+  return p;
+}
+
+// Expose globally
+if (typeof window !== 'undefined') window.x7Fetch = x7Fetch;
+
 async function fetchDashboardOverview() {
   try {
-    const res = await fetch(`${API_BASE}/dashboard/overview`, { headers: authHeaders() });
+    const res = await x7Fetch(`${API_BASE}/dashboard/overview`);
     if (!res.ok) throw new Error('Failed to fetch overview');
     const data = await res.json();
     renderOverviewStats(data.today);
@@ -1110,7 +1236,7 @@ function renderOverviewStats(stats) {
 
 async function fetchActiveConversations() {
   try {
-    const res = await fetch(`${API_BASE}/dashboard/conversations?limit=10`, { headers: authHeaders() });
+    const res = await x7Fetch(`${API_BASE}/dashboard/conversations?limit=10`);
     if (!res.ok) throw new Error('Failed to fetch conversations');
     const data = await res.json();
     renderConversations(data);
@@ -1131,7 +1257,7 @@ function renderConversations(conversations) {
 
 async function fetchLiveOrders() {
   try {
-    const res = await fetch(`${API_BASE}/dashboard/orders/live`, { headers: authHeaders() });
+    const res = await x7Fetch(`${API_BASE}/dashboard/orders/live`);
     if (!res.ok) throw new Error('Failed to fetch live orders');
     const data = await res.json();
     renderLiveOrders(data);

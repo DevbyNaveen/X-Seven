@@ -3,7 +3,7 @@
   // Auth guard: ensure only authenticated and onboarded users can access dashboard
   try {
     if (!window.X7Auth || !X7Auth.isLoggedIn || !X7Auth.isLoggedIn()) {
-      window.location.replace('login.html');
+      window.location.replace('auth.html');
       return;
     }
     const profile = (X7Auth.getProfile && X7Auth.getProfile()) || null;
@@ -24,7 +24,7 @@
       return;
     }
   } catch (e) {
-    try { window.location.replace('login.html'); } catch {}
+    try { window.location.replace('auth.html'); } catch {}
     return;
   }
 
@@ -238,13 +238,39 @@
     nameEl?.focus();
     cancelBtn?.addEventListener('click', ()=> backdrop.remove());
     backdrop.addEventListener('click', (e)=> { if (e.target === backdrop) backdrop.remove(); });
-    form?.addEventListener('submit', (e)=>{
+    form?.addEventListener('submit', async (e)=>{
       e.preventDefault();
+      errEl.textContent = '';
       const name = (nameEl?.value||'').trim();
       if (!name) { errEl.textContent = 'Please enter a category name.'; return; }
       if (hasCatName(name)) { errEl.textContent = 'This category already exists.'; return; }
-      // Store as object to allow future metadata, keep renderer backward compatible
-      writeCategories([...(categories||[]), { name, description: (descEl?.value||'').trim() }]);
+      const description = (descEl?.value||'').trim();
+      // Try backend first
+      try {
+        const headers = (typeof authHeaders === 'function')
+          ? authHeaders({ 'Content-Type': 'application/json' })
+          : (()=>{ const h = { 'Accept':'application/json','Content-Type':'application/json' }; try { const a = (window.X7Auth && X7Auth.getAuth && X7Auth.getAuth()); if (a && a.token) h['Authorization'] = `Bearer ${a.token}`; } catch {} return h; })();
+        const res = await x7Fetch(`${API_BASE}/menu/categories`, {
+          method: 'POST',
+          headers,
+          body: JSON.stringify({ name, description })
+        });
+        if (!res.ok) {
+          try { const j = await res.json(); errEl.textContent = (j && (j.detail?.message || j.detail || j.error || j.msg)) || `Failed to create category (${res.status})`; }
+          catch { errEl.textContent = `Failed to create category (${res.status})`; }
+          return;
+        }
+        const created = await res.json();
+        // Merge into local store and re-render
+        writeCategories([...(categories||[]), created]);
+        renderMenuCategories();
+        backdrop.remove();
+        return;
+      } catch (e) {
+        console.warn('POST /menu/categories failed, falling back to local storage', e);
+      }
+      // Fallback: local-only persistence
+      writeCategories([...(categories||[]), { name, description }]);
       renderMenuCategories();
       backdrop.remove();
     });
@@ -270,7 +296,7 @@
     const items = readCatItems(catOrName);
     if (!items.length) {
       listEl.innerHTML = `
-        <div class="nb-empty" style="padding:16px;">
+        <div class="nb-empty compact">
           <div class="nb-empty-icon"><i class="fa-regular fa-rectangle-list"></i></div>
           <div class="nb-empty-text">No items yet</div>
           <div class="muted small">Click Add Item to create your first menu entry.</div>
@@ -608,6 +634,7 @@
       setChatHeaderVisible(true);
       if (!chatInitialized) {
         chatInitialized = true;
+        // Always initialize dashboard chat interface (WS handled by dashboard_chat.js)
         try { initDashboardChat(); } catch(e) { console.warn('initDashboardChat failed', e); }
       }
     }
@@ -763,7 +790,7 @@
     if (!grid) return;
     const all = getAllMenuItems();
     if (!all.length) {
-      grid.innerHTML = `<div class="nb-empty" style="padding:16px;">No items yet. Add items in <b>Menu Management</b> and they'll appear here automatically.</div>`;
+      grid.innerHTML = `<div class="nb-empty compact">No items yet. Add items in <b>Menu Management</b> and they'll appear here automatically.</div>`;
       return;
     }
     grid.innerHTML = all.map(({category, item})=>{
@@ -986,8 +1013,32 @@
     grid.innerHTML = tiles + addTile;
   }
 
+  // Fetch categories from backend and sync local cache/UI
+  async function syncCategoriesFromBackend(){
+    try {
+      const headers = (typeof authHeaders === 'function')
+        ? authHeaders()
+        : (()=>{ // fallback if authHeaders isn't available
+            const h = { Accept: 'application/json' };
+            try { const a = (window.X7Auth && X7Auth.getAuth && X7Auth.getAuth()); if (a && a.token) h['Authorization'] = `Bearer ${a.token}`; } catch {}
+            return h;
+          })();
+      const res = await x7Fetch(`${API_BASE}/menu/categories`, { headers });
+      if (!res.ok) return; // silent fail, keep local
+      const data = await res.json();
+      if (Array.isArray(data)) {
+        writeCategories(data);
+        renderMenuCategories();
+      }
+    } catch (e) {
+      console.warn('Failed to sync categories from API', e);
+    }
+  }
+
   function initMenuMgmt(){
+    // Initial local render, then try to refresh from backend
     renderMenuCategories();
+    try { syncCategoriesFromBackend(); } catch {}
     const grid = document.querySelector('#centerDynamic .nb-tiles-categories') || document.getElementById('categoriesGrid');
     if (!grid) return;
     grid.addEventListener('click', (e)=>{
@@ -1129,20 +1180,19 @@
 
   // -------- Live Updates (Overview, Conversations, Orders) --------
   async function fetchJSON(url){
-    // Include JWT if available
-    let headers = { 'Accept': 'application/json' };
-    try {
-      const auth = (window.X7Auth && typeof X7Auth.getAuth === 'function') ? X7Auth.getAuth() : null;
-      const token = auth && auth.token;
-      if (token) headers['Authorization'] = `Bearer ${token}`;
-    } catch {}
-    const res = await fetch(url, { headers });
+    const res = await x7Fetch(url);
     if (!res.ok) throw new Error(`Request failed: ${res.status}`);
     return res.json();
   }
 
   async function updateLive(){
     try {
+      const auth = (window.X7Auth && typeof X7Auth.getAuth === 'function') ? X7Auth.getAuth() : null;
+      if (!auth || !auth.token) {
+        console.warn('Auth token not found, skipping live data update.');
+        return;
+      }
+
       const [overview, conversations, orders] = await Promise.all([
         fetchJSON(`${API_BASE}/dashboard/overview`),
         fetchJSON(`${API_BASE}/dashboard/conversations?limit=5`),
@@ -1496,7 +1546,7 @@
       loginBtn.innerHTML = '<i class="fa-solid fa-right-to-bracket"></i> <span>Login</span>';
       loginBtn.onmouseover = function(){ eval(btnHover); };
       loginBtn.onmouseout = function(){ eval(btnOut); };
-      loginBtn.addEventListener('click', ()=> { window.location.href = 'login.html'; });
+      loginBtn.addEventListener('click', ()=> { window.location.href = 'auth.html'; });
       menu.appendChild(loginBtn);
     }
 
@@ -1727,8 +1777,8 @@
   }, true);
 
   // Delegated fallback: ensure clicks anywhere inside #cardChat open chat
-  document.addEventListener('click', (e)=>{
-    const card = e.target?.closest?.('#cardChat');
+  document.addEventListener('click', (e) => {
+    const card = e.target.closest('[data-open-chat]');
     if (card) {
       e.preventDefault();
       setActiveLeftCard(els.cardChat);
@@ -1736,15 +1786,36 @@
     }
   });
 
-  function initLive(){
-    els.refreshBtn?.addEventListener('click', handleRefreshClick);
-    // Initial and periodic refresh
+  // Delegated handler: ensure New Chat button always works even if direct binding missed
+  document.addEventListener('click', (e) => {
+    const btn = e.target.closest('#newChatBtn');
+    if (btn) {
+      // If direct binding exists, skip delegated to avoid double-fire
+      if (btn.dataset && btn.dataset.bound === '1') return;
+      e.preventDefault();
+      try {
+        console.debug('[dashboard-ui] New Chat (delegated) click');
+        startNewDashboardChat();
+      } catch (err) {
+        console.warn('startNewDashboardChat (delegated) failed', err);
+      }
+    }
+  });
+
+  function initLiveUpdates(){
+    // Initial fetch
     updateLive();
+    // Set up interval for live updates (e.g., every 30 seconds)
     if (liveInterval) clearInterval(liveInterval);
     liveInterval = setInterval(updateLive, 30000);
   }
 
-  // Refresh button: spin icon and reload the page
+  function initLive(){
+    initLiveUpdates();
+    // Refresh button: spin icon and reload the page
+    els.refreshBtn?.addEventListener('click', handleRefreshClick);
+  }
+
   function handleRefreshClick(){
     try { els.refreshBtn?.querySelector('i')?.classList.add('fa-spin'); } catch {}
     try { if (typeof updateLive === 'function') updateLive(); } catch {}
@@ -1771,12 +1842,17 @@
     if (dashboardChat) return;
     
     // Get business ID from profile
-    const profile = window.X7Auth?.getProfile?.();
-    const businessId = profile?.businessId;
+    const profile = window.X7Auth?.getProfile?.() || {};
+    const auth = window.X7Auth?.getAuth?.() || {};
+    const businessId = profile.businessId || auth.businessId;
     
     if (!businessId) {
-      console.error('No business ID found in profile');
+      console.error('No business ID found (auth/profile). Please log in again.');
       return;
+    }
+    // Persist businessId into profile for future reads
+    if (!profile.businessId && window.X7Auth?.setProfile) {
+      try { window.X7Auth.setProfile({ ...profile, businessId }); } catch {}
     }
     
     // Create dashboard chat interface
@@ -1867,7 +1943,12 @@
     // New chat button
     const newChatBtn = document.getElementById('newChatBtn');
     if (newChatBtn) {
-      newChatBtn.addEventListener('click', startNewDashboardChat);
+      newChatBtn.addEventListener('click', (ev) => {
+        console.debug('[dashboard-ui] New Chat (direct) click');
+        startNewDashboardChat(ev);
+      });
+      // Mark as directly bound so delegated handler can skip it
+      try { newChatBtn.dataset.bound = '1'; } catch {}
     }
   }
   
@@ -1886,6 +1967,13 @@
     
     // Add user message to UI
     addUserMessageToChat(message);
+    // Persist to active conversation and refresh sidebar list
+    try {
+      const convId = window.X7Chat?.getActiveConversationId?.();
+      if (convId && window.X7Chat?.addMessageToConversation) {
+        window.X7Chat.addMessageToConversation(convId, 'user', message);
+      }
+    } catch {}
     
     // Send message via WebSocket
     try {
@@ -1899,23 +1987,91 @@
   /**
    * Start a new dashboard chat session
    */
-  function startNewDashboardChat() {
-    // Clear chat messages
-    const messagesContainer = document.getElementById('messages');
-    if (messagesContainer) {
-      messagesContainer.innerHTML = '';
+  async function startNewDashboardChat() {
+    // Reentrancy guard to avoid double-invocation (e.g., direct + delegated handlers)
+    if (window.__newChatBusy) {
+      console.debug('[dashboard-ui] New Chat ignored: operation in progress');
+      return;
     }
-    
-    // Create new session
-    if (dashboardChat) {
-      dashboardChat.closeWebSocket();
-      dashboardChat = new DashboardChatInterface(dashboardChat.businessId);
-      dashboardChat.onMessage = handleDashboardChatMessage;
-      dashboardChat.onConnectionChange = handleDashboardConnectionChange;
-      dashboardChat.connectWebSocket();
+    window.__newChatBusy = true;
+    try {
+      // Disable the button during reset to prevent rapid clicks
+      const btn = document.getElementById('newChatBtn');
+      try { if (btn) btn.disabled = true; } catch {}
+
+      // Always ensure the chat UI is visible when starting a new chat
+      try { forceShowChat(); } catch (e) { console.debug('forceShowChat failed', e); }
+
+      // Clear chat messages UI
+      const messagesContainer = document.getElementById('messages');
+      if (messagesContainer) messagesContainer.innerHTML = '';
+      // Focus input for immediate typing
+      try { document.getElementById('input')?.focus(); } catch {}
+
+      // Create and activate a new conversation in the global list (dashboard-dedicated)
+      try {
+        const bizId = (dashboardChat && dashboardChat.businessId)
+          || window.X7Auth?.getProfile?.()?.businessId
+          || window.X7Auth?.getAuth?.()?.businessId
+          || null;
+        if (window.X7Chat?.createConversation && window.X7Chat?.setActiveConversation) {
+          const conv = window.X7Chat.createConversation({
+            isDedicated: !!bizId,
+            businessId: bizId ? Number(bizId) : null,
+            title: bizId ? `Business ${bizId}` : 'Business Owners Chatting',
+          });
+          window.X7Chat.setActiveConversation(conv.id, { connect: false, render: true });
+        }
+      } catch (e) { console.warn('Failed to create dashboard conversation', e); }
+
+      if (dashboardChat) {
+        const oldSessionId = dashboardChat.sessionId;
+        const businessId = dashboardChat.businessId;
+        try {
+          // Best-effort: delete server-side conversation memory for this session
+          await deleteDashboardConversation(businessId, oldSessionId);
+          console.log('Deleted dashboard conversation', { businessId, oldSessionId });
+        } catch (e) {
+          console.warn('Delete dashboard conversation failed (continuing with reset):', e?.message || e);
+        }
+
+        // Close existing socket and reset local session id
+        try { dashboardChat.closeWebSocket(); } catch {}
+        try { localStorage.removeItem('x7_dashboard_chat_session_id'); } catch {}
+
+        // Create new chat instance with a fresh session id
+        dashboardChat = new DashboardChatInterface(businessId);
+        dashboardChat.onMessage = handleDashboardChatMessage;
+        dashboardChat.onConnectionChange = handleDashboardConnectionChange;
+        dashboardChat.connectWebSocket();
+      } else {
+        // If the chat interface hasn't been initialized yet, do it now
+        try {
+          initDashboardChat();
+          // After init, ensure a conversation exists and is active
+          try {
+            const bizId = window.dashboardChat?.businessId
+              || window.X7Auth?.getProfile?.()?.businessId
+              || window.X7Auth?.getAuth?.()?.businessId
+              || null;
+            if (window.X7Chat?.createConversation && window.X7Chat?.setActiveConversation) {
+              const conv = window.X7Chat.createConversation({
+                isDedicated: !!bizId,
+                businessId: bizId ? Number(bizId) : null,
+                title: bizId ? `Business ${bizId}` : 'Business Owners Chatting',
+              });
+              window.X7Chat.setActiveConversation(conv.id, { connect: false, render: true });
+            }
+          } catch {}
+        } catch (e) { console.warn('initDashboardChat in new chat failed', e); }
+      }
+
+      console.log('Started new dashboard chat session (fresh temporary memory)');
+    } finally {
+      window.__newChatBusy = false;
+      // Re-enable button
+      try { const btn = document.getElementById('newChatBtn'); if (btn) btn.disabled = false; } catch {}
     }
-    
-    console.log('Started new dashboard chat session');
   }
   
   /**
@@ -2008,6 +2164,14 @@
       }
     }
     
+    // Persist bot message to active conversation and refresh sidebar list
+    try {
+      const convId = window.X7Chat?.getActiveConversationId?.();
+      if (convId && window.X7Chat?.addMessageToConversation) {
+        window.X7Chat.addMessageToConversation(convId, 'bot', message || '');
+      }
+    } catch {}
+
     messagesContainer.scrollTop = messagesContainer.scrollHeight;
   }
   
@@ -2042,6 +2206,57 @@
     return div.innerHTML;
   }
 
+  // Build Authorization headers for API requests
+  function authHeaders(extra = {}) {
+    try {
+      let token = window.X7Auth?.getAuth?.()?.token;
+      // Fallback to localStorage if X7Auth is unavailable or empty
+      if (!token) {
+        try {
+          const raw = localStorage.getItem('x7_auth');
+          if (raw) token = JSON.parse(raw)?.token || null;
+        } catch {}
+      }
+      return {
+        'Accept': 'application/json',
+        ...extra,
+        ...(token ? { 'Authorization': `Bearer ${token}` } : {}),
+      };
+    } catch {
+      return { 'Accept': 'application/json', ...extra };
+    }
+  }
+
+  // Resolve API base URL similar to DashboardChatInterface
+  function getApiBase() {
+    try {
+      if (window.dashboardChat && window.dashboardChat.apiBase) return window.dashboardChat.apiBase;
+      const qs = new URLSearchParams(window.location.search);
+      const param = qs.get('api');
+      if (param) localStorage.setItem('x7_api_base', param);
+      const saved = localStorage.getItem('x7_api_base');
+      const env = (typeof window !== 'undefined' && (window.API_BASE || window.__API_BASE__)) || saved;
+      if (env) return ('' + env).replace(/\/$/, '');
+      return 'http://localhost:8000/api/v1';
+    } catch {
+      return 'http://localhost:8000/api/v1';
+    }
+  }
+
+  // DELETE dashboard conversation memory on backend (best-effort)
+  async function deleteDashboardConversation(businessId, sessionId) {
+    if (!businessId || !sessionId) return;
+    const base = getApiBase();
+    const url = `${base}/chat/dashboard/${businessId}/${sessionId}`;
+    const res = await x7Fetch(url, { method: 'DELETE' });
+    if (!res.ok) {
+      const msg = `Delete failed: ${res.status}`;
+      // surface 401 in logs but do not throw to avoid blocking UI reset
+      console.warn('[deleteDashboardConversation]', msg);
+    }
+    return true;
+  }
+
   function initTabs(){
     els.tabs.forEach(btn => btn.addEventListener('click', ()=> {
       if (btn.dataset.view === 'chat') allowChatOpen = true;
@@ -2068,5 +2283,36 @@
     // Open Home as the default main screen
     openCenterPage('home', 'Home');
     setActiveLeftCard(els.cardHome);
+    // Enable dashboard chat mode so app.js does not connect to global AI
+    try { window.USE_DASHBOARD_CHAT = true; } catch {}
+    // Listen for conversation title updates from app.js and reflect in dashboard header
+    try {
+      if (window._onConvTitleChanged) document.removeEventListener('x7:conversationTitleChanged', window._onConvTitleChanged);
+    } catch {}
+    window._onConvTitleChanged = function(e){
+      try {
+        const detail = e && e.detail;
+        if (!detail || !detail.id || !detail.title) return;
+        const activeId = window.X7Chat?.getActiveConversationId?.();
+        if (!activeId || detail.id !== activeId) return;
+        const headerEl = document.querySelector('#waChat .wa-contact');
+        if (headerEl) headerEl.textContent = detail.title;
+      } catch {}
+    };
+    document.addEventListener('x7:conversationTitleChanged', window._onConvTitleChanged);
+    // Initialize chat UI from app.js so sidebar toggle and chat list work
+    try {
+      if (typeof window.initChat === 'function') {
+        window._chatInitByApp = true;
+        window.initChat();
+      }
+    } catch (e) { console.warn('initChat failed', e); }
+    // Initialize dashboard chat interface (WebSocket, send handlers) once
+    try {
+      if (!chatInitialized) {
+        chatInitialized = true;
+        initDashboardChat();
+      }
+    } catch (e) { console.warn('initDashboardChat failed', e); }
   });
 })();

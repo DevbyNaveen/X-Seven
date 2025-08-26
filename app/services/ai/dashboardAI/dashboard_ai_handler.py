@@ -1,3 +1,4 @@
+# app/services/ai/dashboardAI/dashboard_ai_handler.py
 """
 Dashboard AI Handler - Routes from Central AI Handler
 
@@ -9,6 +10,7 @@ from __future__ import annotations
 
 import json
 import asyncio
+import re
 from typing import Dict, Any, Optional, List
 from datetime import datetime
 from enum import Enum
@@ -17,6 +19,13 @@ from sqlalchemy.orm import Session
 
 from app.models import Business, MenuItem, MenuCategory, Order, OrderStatus
 from typing import TYPE_CHECKING
+import logging
+
+# Import action managers
+from app.services.ai.dashboardAI.Food.category_manager import CategoryManager
+from app.services.ai.dashboardAI.Food.menu_manager import MenuManager
+from app.services.ai.dashboardAI.Food.order_manager import OrderManager
+from app.services.ai.dashboardAI.Food.inventory_manager import InventoryManager
 
 if TYPE_CHECKING:
     from app.services.ai.centralAI.central_ai_handler import CentralAIHandler, ChatType, UnifiedContext
@@ -49,6 +58,12 @@ class DashboardAIHandler:
             self.central_ai = CentralAIHandler(db)
         else:
             self.central_ai = central_ai
+        
+        # Initialize action managers
+        self.category_manager = CategoryManager(db)
+        self.menu_manager = MenuManager(db)
+        self.order_manager = OrderManager(db)
+        self.inventory_manager = InventoryManager(db)
     
     async def handle_dashboard_request(
         self,
@@ -81,20 +96,29 @@ class DashboardAIHandler:
             # Generate AI response using central AI
             prompt = await self._create_dashboard_prompt(unified_context)
             ai_response = await self.central_ai._get_ai_response(prompt)
-            final_response = await self.central_ai._clean_response(ai_response)
+            cleaned_response = await self.central_ai._clean_response(ai_response)
+            
+            # Extract structured intent from AI response
+            intent = self._extract_intent_from_response(cleaned_response)
+            
+            # If AI provided structured intent, execute the corresponding action
+            if intent and intent.get("action"):
+                action_result = await self._execute_action(business_id, intent)
+                if action_result and action_result.get("message"):
+                    cleaned_response += "\n\n" + action_result["message"]
             
             # Save conversation
-            await self.central_ai._save_conversation(unified_context, final_response)
+            await self.central_ai._save_conversation(unified_context, cleaned_response)
             
             return {
-                "message": final_response,
+                "message": cleaned_response,
                 "success": True,
-                # Avoid importing ChatType at runtime to prevent circular import; return string literal
                 "chat_type": "dashboard",
                 "business_id": business_id
             }
             
         except Exception as e:
+            logger.exception("Dashboard request failed: %s", e)
             return {
                 "message": "I'm having trouble processing your dashboard request. Please try again.",
                 "success": False,
@@ -160,7 +184,6 @@ class DashboardAIHandler:
             return {
                 "live_orders": [{
                     "id": order.id,
-                    # Use id as order number (no explicit order_number field)
                     "order_number": order.id,
                     "status": getattr(order.status, "value", str(order.status) if order.status else None),
                     "total_amount": float(order.total_amount or 0),
@@ -175,7 +198,6 @@ class DashboardAIHandler:
                 "inventory_items": [{
                     "id": item.id,
                     "name": item.name,
-                    # Map from MenuItem fields
                     "quantity": int(item.stock_quantity or 0),
                     "unit": "units",
                     "reorder_level": int(item.min_stock_threshold or 0)
@@ -185,10 +207,11 @@ class DashboardAIHandler:
                     "title": rem.get("title"),
                     "description": rem.get("description"),
                     "due_date": rem.get("due_date"),
-                    "is_completed": rem.get(False)
+                    "is_completed": rem.get("is_completed", False)
                 } for rem in reminders]
             }
         except Exception as e:
+            logger.exception("Failed loading dashboard data for business %s: %s", business_id, e)
             # Return empty data if there's an error
             return {
                 "live_orders": [],
@@ -250,49 +273,137 @@ Current time: {context.current_time.strftime('%Y-%m-%d %H:%M')}
         base += """## Your Response
 You are assisting the business owner/manager with dashboard management tasks. Respond naturally and helpfully:
 
-1. For inventory requests:
-   - Help manage stock levels
-   - Suggest reorder quantities
-   - Identify low stock items
-   - Track usage patterns
+First, extract the user's intent in JSON format:
+{
+  "domain": "category|menu|order|inventory",
+  "action": "add_category|list_categories|update_category|delete_category|add_item|list_menu|update_item|delete_item|list_orders|view_order|update_order_status|cancel_order|list_inventory|update_stock|low_stock_report",
+  "data": {
+    // Action-specific parameters
+  }
+}
 
-2. For menu requests:
-   - Help manage menu items
-   - Suggest pricing changes
-   - Update availability
-   - Organize categories
-
-3. For order requests:
-   - Provide order status updates
-   - Help with order modifications
-   - Track order history
-   - Handle customer inquiries
-
-4. For reminder requests:
-   - Set new reminders
-   - Update existing reminders
-   - Mark reminders as complete
-   - Provide reminder summaries
-
-5. For analytics requests:
-   - Provide business insights
-   - Show performance metrics
-   - Suggest improvements
-   - Compare time periods
+Then, respond naturally to the user, confirming the action or asking for clarification.
 
 Response Guidelines:
-- Be concise and action-oriented
-- Use bullet points when listing steps
-- If specific data is needed, ask for it clearly
-- Focus on business management tasks
-- Provide actionable recommendations
-- Use markdown formatting for clarity
+1. For category requests:
+   - add_category: Create new menu category
+   - list_categories: Show all categories
+   - update_category: Modify existing category
+   - delete_category: Remove category (only if empty)
 
-Example responses:
-- \"Here's the current status of your live orders...\"
-- \"I've identified 3 low-stock items that need attention...\"
-- \"Based on your sales data, I recommend...\"
-- \"I can help you update that menu item. What changes would you like to make?\"
+2. For menu requests:
+   - add_item: Add new menu item
+   - list_menu: Show all menu items
+   - update_item: Modify existing menu item
+   - delete_item: Remove menu item
+
+3. For order requests:
+   - list_orders: Show recent orders (can filter by status)
+   - view_order: Show details of specific order
+   - update_order_status: Change order status
+   - cancel_order: Cancel an order
+
+4. For inventory requests:
+   - list_inventory: Show all inventory items
+   - update_stock: Update stock levels or reorder points
+   - low_stock_report: Show items needing reorder
+
+Examples:
+- To add a category: {"domain": "category", "action": "add_category", "data": {"name": "Appetizers", "description": "Starters and small plates"}}
+- To add a menu item: {"domain": "menu", "action": "add_item", "data": {"name": "Caesar Salad", "price": 8.99, "description": "Fresh romaine with parmesan", "category_name": "Salads"}}
+- To update stock: {"domain": "inventory", "action": "update_stock", "data": {"item_name": "Tomatoes", "quantity": 50, "reorder_level": 20}}
+- To list orders: {"domain": "order", "action": "list_orders", "data": {"status": "pending"}}
+
+Response Format:
+1. First provide the JSON intent block
+2. Then provide a natural language response to the user
+
+Example response:
+{
+  "domain": "category",
+  "action": "add_category",
+  "data": {
+    "name": "Desserts",
+    "description": "Sweet treats and desserts"
+  }
+}
+I'll add the 'Desserts' category to your menu right away.
 """
         
         return base
+
+    def _extract_intent_from_response(self, response: str) -> Dict[str, Any]:
+        """Extract structured intent from AI response"""
+        # 1) Prefer fenced JSON blocks (```json { ... } ``` or ``` { ... } ```)
+        try:
+            fenced_blocks = re.findall(r"```(?:json)?\s*(\{[\s\S]*?\})\s*```", response, flags=re.IGNORECASE)
+            for block in fenced_blocks:
+                try:
+                    intent = json.loads(block)
+                    if isinstance(intent, dict) and intent.get("action"):
+                        return intent
+                except Exception:
+                    continue
+        except Exception:
+            pass
+
+        # 2) Fallback: scan for the first balanced JSON object and try to parse it
+        def find_balanced_json(text: str) -> Optional[str]:
+            start = text.find("{")
+            while start != -1:
+                depth = 0
+                in_str = False
+                esc = False
+                for i in range(start, len(text)):
+                    ch = text[i]
+                    if in_str:
+                        if esc:
+                            esc = False
+                        elif ch == "\\":
+                            esc = True
+                        elif ch == '"':
+                            in_str = False
+                    else:
+                        if ch == '"':
+                            in_str = True
+                        elif ch == "{":
+                            depth += 1
+                        elif ch == "}":
+                            depth -= 1
+                            if depth == 0:
+                                return text[start:i+1]
+                start = text.find("{", start + 1)
+            return None
+
+        candidate = find_balanced_json(response)
+        if candidate:
+            try:
+                intent = json.loads(candidate)
+                if isinstance(intent, dict) and intent.get("action"):
+                    return intent
+            except Exception:
+                pass
+        return {}
+
+    async def _execute_action(self, business_id: int, intent: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+        """Execute the action based on extracted intent"""
+        domain = intent.get("domain", "")
+        action = intent.get("action", "")
+        
+        try:
+            if domain == "category":
+                return await self.category_manager.handle_category_request(business_id, intent)
+            elif domain == "menu":
+                return await self.menu_manager.handle_menu_request(business_id, intent)
+            elif domain == "order":
+                return await self.order_manager.handle_order_request(business_id, intent)
+            elif domain == "inventory":
+                return await self.inventory_manager.handle_inventory_request(business_id, intent)
+            else:
+                return None
+        except Exception as e:
+            logger.exception("Error executing dashboard action: %s", e)
+            return {
+                "success": False,
+                "message": f"Error executing action: {str(e)}"
+            }

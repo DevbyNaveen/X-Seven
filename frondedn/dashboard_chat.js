@@ -76,7 +76,17 @@ class DashboardChatInterface {
     const headers = { 'Accept': 'application/json', ...extra };
     try {
       const auth = (window.X7Auth && typeof X7Auth.getAuth === 'function') ? X7Auth.getAuth() : null;
-      const token = auth && auth.token;
+      let token = auth && auth.token;
+      // Fallback to localStorage if X7Auth is unavailable or lacks token
+      if (!token) {
+        try {
+          const raw = localStorage.getItem('x7_auth');
+          if (raw) {
+            const parsed = JSON.parse(raw);
+            if (parsed && parsed.token) token = parsed.token;
+          }
+        } catch {}
+      }
       if (token) headers['Authorization'] = `Bearer ${token}`;
     } catch {}
     return headers;
@@ -89,9 +99,9 @@ class DashboardChatInterface {
    */
   async sendMessage(message) {
     try {
-      const response = await fetch(`${this.apiBase}/chat/dashboard`, {
+      const response = await x7Fetch(`${this.apiBase}/chat/dashboard`, {
         method: 'POST',
-        headers: this.buildAuthHeaders({ 'Content-Type': 'application/json' }),
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           message: message,
           session_id: this.sessionId,

@@ -82,7 +82,7 @@ class DedicatedChatInterface {
    */
   async initializeSession() {
     try {
-      const response = await fetch(`${this.apiBase}/dedicated-chat/business/${this.businessId}/initialize`, {
+      const response = await x7Fetch(`${this.apiBase}/dedicated-chat/business/${this.businessId}/initialize`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -113,7 +113,7 @@ class DedicatedChatInterface {
    */
   async sendMessage(message, stream = true) {
     try {
-      const response = await fetch(`${this.apiBase}/dedicated-chat/business/${this.businessId}`, {
+      const response = await x7Fetch(`${this.apiBase}/dedicated-chat/business/${this.businessId}`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -343,7 +343,7 @@ class DedicatedChatInterface {
    */
   async fetchBusinessContext() {
     try {
-      const response = await fetch(`${this.apiBase}/dedicated-chat/business/${this.businessId}/context?session_id=${encodeURIComponent(this.sessionId)}`);
+      const response = await x7Fetch(`${this.apiBase}/dedicated-chat/business/${this.businessId}/context?session_id=${encodeURIComponent(this.sessionId)}`);
       
       if (!response.ok) {
         throw new Error(`HTTP error! status: ${response.status}`);

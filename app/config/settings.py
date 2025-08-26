@@ -45,6 +45,8 @@ class Settings(BaseSettings):
     SECRET_KEY: str = "dev-secret-change-me"
     ALGORITHM: str = "HS256"
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 30
+    # Refresh tokens are long-lived
+    REFRESH_TOKEN_EXPIRE_DAYS: int = 7
     
     # CORS
     BACKEND_CORS_ORIGINS: List[str] = [

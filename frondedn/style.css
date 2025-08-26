@@ -1939,8 +1939,10 @@ body.auth-page {
 .nb-right-footer { padding: 10px; border-top:1px solid var(--nb-border); background: var(--nb-elev-2); }
 
 /* Empty states */
-.nb-empty { border:1px dashed var(--nb-border); border-radius:10px; padding:24px; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:8px; width:100%; }
+.nb-empty { border:1px dashed var(--nb-border); border-radius:12px; padding:24px; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:10px; width:100%; text-align:center; background: var(--nb-elev-1, var(--panel)); box-shadow: 0 2px 0 rgba(0,0,0,.25); }
 .nb-empty.big { padding:40px; }
+.nb-empty.compact { padding:16px; }
+.nb-empty b { color: var(--nb-accent, var(--accent)); }
 .nb-empty-icon { font-size:28px; color: var(--nb-muted); }
 .nb-empty-text { font-weight:600; }
 .small { font-size: 0.9rem; }

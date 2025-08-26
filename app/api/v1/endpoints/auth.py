@@ -7,10 +7,16 @@ from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy.orm import Session
 from app.config.database import get_db
 from app.config.settings import settings
-from app.core.security import verify_password, get_password_hash, create_access_token
+from app.core.security import (
+    verify_password,
+    get_password_hash,
+    create_access_token,
+    create_refresh_token,
+    decode_refresh_token,
+)
 from app.core.exceptions import DuplicateError
 from app.models import Business, User, UserRole, SubscriptionPlan
-from app.schemas.auth import Token, RegisterBusinessRequest, LoginRequest
+from app.schemas.auth import Token, RegisterBusinessRequest, LoginRequest, RefreshRequest
 
 router = APIRouter()
 
@@ -75,17 +81,20 @@ async def register_business(
     db.commit()
     db.refresh(admin_user)
     
-    # Create access token
+    # Create tokens
     access_token_expires = timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
     access_token = create_access_token(
-        data={"sub": admin_user.email, "business_id": business.id}
+        data={"sub": admin_user.email, "business_id": business.id},
+        expires_delta=access_token_expires,
     )
+    refresh_token = create_refresh_token(data={"sub": admin_user.email, "business_id": business.id})
     
     return Token(
         access_token=access_token,
         token_type="bearer",
         business_id=business.id,
-        user_role=admin_user.role
+        user_role=admin_user.role,
+        refresh_token=refresh_token,
     )
 
 
@@ -112,17 +121,67 @@ async def login(
             detail="Inactive user"
         )
     
-    # Create access token
+    # Create tokens
     access_token_expires = timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
     access_token = create_access_token(
-        data={"sub": user.email, "business_id": user.business_id}
+        data={"sub": user.email, "business_id": user.business_id},
+        expires_delta=access_token_expires,
     )
+    refresh_token = create_refresh_token(data={"sub": user.email, "business_id": user.business_id})
     
     return Token(
         access_token=access_token,
         token_type="bearer",
         business_id=user.business_id,
-        user_role=user.role
+        user_role=user.role,
+        refresh_token=refresh_token,
+    )
+
+
+@router.post("/refresh", response_model=Token)
+async def refresh_token_endpoint(
+    request: RefreshRequest,
+    db: Session = Depends(get_db)
+) -> Any:
+    """
+    Exchange a refresh token for a new access token (and rotated refresh token).
+    """
+    payload = decode_refresh_token(request.refresh_token)
+    if not payload:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid refresh token",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
+    email: str = payload.get("sub")
+    if not email:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid refresh token payload",
+        )
+
+    user = db.query(User).filter(User.email == email).first()
+    if not user or not user.is_active:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="User inactive or not found",
+        )
+
+    # Issue new tokens
+    access_token_expires = timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
+    new_access = create_access_token(
+        data={"sub": user.email, "business_id": user.business_id},
+        expires_delta=access_token_expires,
+    )
+    new_refresh = create_refresh_token(data={"sub": user.email, "business_id": user.business_id})
+
+    return Token(
+        access_token=new_access,
+        token_type="bearer",
+        business_id=user.business_id,
+        user_role=user.role,
+        refresh_token=new_refresh,
     )
 
 
