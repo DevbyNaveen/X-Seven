@@ -115,3 +115,6 @@ google-cloud-storage==2.10.0
 
 # APM (Application Performance Monitoring)
 ddtrace==2.3.0
+
+# Database
+supabase==2.3.1

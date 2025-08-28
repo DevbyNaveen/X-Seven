@@ -126,7 +126,14 @@ class Settings(BaseSettings):
         "LV": ["vonage", "messagebird"],
         "EE": ["twilio", "vonage"],
         "LT": ["vonage", "twilio"],
+
     }
+    
+    # Supabase
+    SUPABASE_URL: Optional[str] = None
+    SUPABASE_API_KEY: Optional[str] = None
+
+    
     
     # Modern Pydantic configuration
     model_config = SettingsConfigDict(
