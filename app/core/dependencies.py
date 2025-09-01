@@ -1,94 +1,151 @@
 """Common dependencies for API endpoints."""
 from typing import Generator, Optional, Dict, Any
-from fastapi import Depends, HTTPException, status
+from fastapi import Depends, HTTPException, status, Header
 from fastapi.security import OAuth2PasswordBearer
 from sqlalchemy.orm import Session
 from jose import JWTError 
 from app.config.database import get_db
 from app.core.security import decode_access_token
+from app.core.supabase_auth import verify_supabase_token
 from app.models.user import User
 from app.models.business import Business
 
-# This scheme is for dependencies that REQUIRE a token
-oauth2_scheme_strict = OAuth2PasswordBearer(tokenUrl="/api/v1/auth/login")
-
-# This scheme is for OPTIONAL tokens. It won't error if the token is missing.
-oauth2_scheme_optional = OAuth2PasswordBearer(tokenUrl="/api/v1/auth/login", auto_error=False)
+# OAuth2 schemes are no longer used since we're using Header-based authentication
+# that supports both custom JWT and Supabase tokens
 
 
 async def get_current_user(
-    token: str = Depends(oauth2_scheme_strict),
+    authorization: Optional[str] = Header(None),
     db: Session = Depends(get_db)
 ) -> User:
     """
-    Get current authenticated user from JWT token. This is a strict dependency
-    and will raise an error if the user is not found or the token is invalid.
+    Get current authenticated user from either custom JWT or Supabase token.
+    This is a strict dependency and will raise an error if the user is not found 
+    or the token is invalid.
     """
-    try:
-        payload = decode_access_token(token)
-        if not payload:
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Could not validate credentials",
-                headers={"WWW-Authenticate": "Bearer"},
-            )
-    except JWTError:
+    if not authorization:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Could not validate credentials",
+            detail="Authorization header required",
             headers={"WWW-Authenticate": "Bearer"},
         )
     
-    # Get email from token (sub field)
-    email: str = payload.get("sub")
-    if not email:
+    # Check if it's a Bearer token
+    if not authorization.startswith("Bearer "):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid token payload",
+            detail="Invalid authorization header format",
+            headers={"WWW-Authenticate": "Bearer"},
         )
     
-    # Find user by email
-    user = db.query(User).filter(User.email == email).first()
-    if not user:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="User not found",
-        )
+    token = authorization.split("Bearer ")[1]
     
-    if not user.is_active:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Inactive user",
-        )
+    # Try to decode as custom JWT first
+    payload = decode_access_token(token)
     
-    return user
+    if payload:
+        # It's a custom JWT token
+        email: str = payload.get("sub")
+        if not email:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Invalid token payload",
+            )
+        
+        # Find user by email
+        user = db.query(User).filter(User.email == email).first()
+        if not user:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="User not found",
+            )
+        
+        if not user.is_active:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Inactive user",
+            )
+        
+        return user
+    
+    # If custom JWT failed, try Supabase token
+    try:
+        supabase_payload = await verify_supabase_token(token)
+        
+        if supabase_payload:
+            email: str = supabase_payload.get("email")
+            if not email:
+                raise HTTPException(
+                    status_code=status.HTTP_401_UNAUTHORIZED,
+                    detail="Invalid Supabase token payload",
+                )
+            
+            # Find user by email
+            user = db.query(User).filter(User.email == email).first()
+            if not user:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail="User not found in system. Please register first.",
+                )
+            
+            if not user.is_active:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Inactive user",
+                )
+            
+            return user
+    except Exception:
+        # If both failed, raise authentication error
+        pass
+    
+    raise HTTPException(
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        detail="Could not validate credentials",
+        headers={"WWW-Authenticate": "Bearer"},
+    )
 
 
 async def get_current_user_optional(
-    token: Optional[str] = Depends(oauth2_scheme_optional),
+    authorization: Optional[str] = Header(None),
     db: Session = Depends(get_db)
 ) -> Optional[User]:
     """
     Gets the current user if a token is provided, but returns None
     instead of raising an error if the token is missing or invalid.
+    Supports both custom JWT and Supabase tokens.
     """
-    if token is None:
+    if authorization is None or not authorization.startswith("Bearer "):
         return None
+    
+    token = authorization.split("Bearer ")[1]
+    
     try:
+        # Try to decode as custom JWT first
         payload = decode_access_token(token)
-        if not payload:
-            return None
+        if payload:
+            email: str = payload.get("sub")
+            if not email:
+                return None
 
-        # Get email from token (sub field)
-        email: str = payload.get("sub")
-        if not email:
-            return None
+            user = db.query(User).filter(User.email == email).first()
+            if not user or not user.is_active:
+                return None
 
-        user = db.query(User).filter(User.email == email).first()
-        if not user or not user.is_active:
-            return None
+            return user
+        
+        # If custom JWT failed, try Supabase token
+        supabase_payload = await verify_supabase_token(token)
+        if supabase_payload:
+            email: str = supabase_payload.get("email")
+            if not email:
+                return None
 
-        return user
+            user = db.query(User).filter(User.email == email).first()
+            if not user or not user.is_active:
+                return None
+
+            return user
     except (JWTError, Exception):
         # If any error occurs during token processing, treat as a guest user.
         return None

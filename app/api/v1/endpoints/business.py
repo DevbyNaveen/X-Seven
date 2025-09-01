@@ -4,7 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 from app.config.database import get_db
 from app.core.dependencies import get_current_business
-from app.models import Business, PhoneNumberType
+from app.models import Business, PhoneNumberType, User
 from app.schemas.business import BusinessPhoneConfig, PhoneProvisioningResponse
 # Correctly import the single manager class
 from app.services.phone.providers.multi_provider_manager import MultiProviderPhoneManager
@@ -16,8 +16,8 @@ router = APIRouter()
 async def setup_phone_configuration(
     business_id: int,
     config: BusinessPhoneConfig,
-    db: Session = Depends(get_db),
-    current_business: Business = Depends(get_current_business)
+    current_business: Business = Depends(get_current_business),
+    db: Session = Depends(get_db)
 ) -> Any:
     """
     Configure phone setup for a business.
@@ -53,8 +53,8 @@ async def setup_phone_configuration(
 @router.get("/{business_id}/phone-status")
 async def get_phone_status(
     business_id: int,
-    db: Session = Depends(get_db),
-    current_business: Business = Depends(get_current_business)
+    current_business: Business = Depends(get_current_business),
+    db: Session = Depends(get_db)
 ) -> Any:
     """Get current phone configuration and usage for a business."""
     if current_business.id != business_id:
@@ -80,8 +80,8 @@ async def get_phone_status(
 async def initiate_human_transfer(
     business_id: int,
     body: dict,
-    db: Session = Depends(get_db),
-    current_business: Business = Depends(get_current_business)
+    current_business: Business = Depends(get_current_business),
+    db: Session = Depends(get_db)
 ) -> Any:
     """Initiate transfer to human staff (custom numbers only)."""
     call_sid = body.get("call_sid")

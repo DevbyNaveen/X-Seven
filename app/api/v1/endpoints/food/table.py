@@ -33,8 +33,8 @@ class CustomerAssignment(BaseModel):
 async def get_food_tables(
     status: Optional[TableStatus] = Query(None, description="Filter by table status"),
     section: Optional[str] = Query(None, description="Filter by section"),
-    db: Session = Depends(get_db),
-    business: Business = Depends(get_current_business)
+    business: Business = Depends(get_current_business),
+    db: Session = Depends(get_db)
 ) -> Any:
     """
     Get all tables with current status for food service.
@@ -58,8 +58,8 @@ async def get_food_tables(
 async def update_table_status(
     table_id: int,
     status: TableStatus,
-    db: Session = Depends(get_db),
-    business: Business = Depends(get_current_business)
+    business: Business = Depends(get_current_business),
+    db: Session = Depends(get_db)
 ) -> Any:
     """
     Update table status.
@@ -103,9 +103,9 @@ async def update_table_status(
 async def assign_customer_to_table(
     table_id: int,
     assignment: CustomerAssignment,
-    db: Session = Depends(get_db),
     business: Business = Depends(get_current_business),
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
 ) -> Any:
     """
     Assign customer to table and create initial order.
@@ -184,8 +184,8 @@ async def assign_customer_to_table(
 async def check_table_availability(
     section: Optional[str] = Query(None, description="Filter by section"),
     capacity: Optional[int] = Query(None, description="Minimum capacity required"),
-    db: Session = Depends(get_db),
-    business: Business = Depends(get_current_business)
+    business: Business = Depends(get_current_business),
+    db: Session = Depends(get_db)
 ) -> Any:
     """
     Check table availability.
@@ -229,8 +229,8 @@ async def check_table_availability(
 @router.put("/layout", response_model=Dict[str, Any])
 async def update_table_layout(
     layout_update: TableLayoutUpdate,
-    db: Session = Depends(get_db),
-    business: Business = Depends(get_current_business)
+    business: Business = Depends(get_current_business),
+    db: Session = Depends(get_db)
 ) -> Any:
     """
     Update table layout.

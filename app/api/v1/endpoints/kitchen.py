@@ -13,8 +13,8 @@ router = APIRouter()
 
 @router.get("/orders/pending")
 async def get_pending_kitchen_orders(
-    db: Session = Depends(get_db),
-    business: Business = Depends(get_current_business)
+    business: Business = Depends(get_current_business),
+    db: Session = Depends(get_db)
 ) -> List[Dict[str, Any]]:
     """Get pending orders for kitchen display."""
     orders = db.query(Order).filter(
@@ -41,8 +41,8 @@ async def get_pending_kitchen_orders(
 async def start_preparing_order(
     order_id: int,
     estimated_minutes: int = 15,
-    db: Session = Depends(get_db),
-    business: Business = Depends(get_current_business)
+    business: Business = Depends(get_current_business),
+    db: Session = Depends(get_db)
 ) -> Any:
     """Mark order as being prepared."""
     order = db.query(Order).filter(
@@ -76,8 +76,8 @@ async def start_preparing_order(
 @router.put("/orders/{order_id}/complete")
 async def complete_order(
     order_id: int,
-    db: Session = Depends(get_db),
-    business: Business = Depends(get_current_business)
+    business: Business = Depends(get_current_business),
+    db: Session = Depends(get_db)
 ) -> Any:
     """Mark order as ready for pickup/delivery."""
     order = db.query(Order).filter(
@@ -110,8 +110,8 @@ async def complete_order(
 async def send_kitchen_notification(
     message: str,
     priority: str = "normal",
-    db: Session = Depends(get_db),
-    business: Business = Depends(get_current_business)
+    business: Business = Depends(get_current_business),
+    db: Session = Depends(get_db)
 ) -> Any:
     """Send notification to kitchen staff."""
     await manager.broadcast_to_business(

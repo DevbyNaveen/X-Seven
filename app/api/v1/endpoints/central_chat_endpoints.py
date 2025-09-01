@@ -56,9 +56,9 @@ async def global_chat(request: Dict[str, Any], db: Session = Depends(get_db)):
 async def delete_dashboard_conversation(
     business_id: int,
     session_id: str,
-    db: Session = Depends(get_db),
     business: Business = Depends(get_current_business),
     current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
 ) -> Dict[str, Any]:
     """Delete all messages for a dashboard chat session scoped to a business.
 
@@ -124,16 +124,19 @@ async def dedicated_chat(
 
 
 @router.post("/dashboard")
-async def dashboard_chat(request: Dict[str, Any], db: Session = Depends(get_db)):
+async def dashboard_chat(
+    request: Dict[str, Any], 
+    current_business: Business = Depends(get_current_business),
+    db: Session = Depends(get_db)
+):
     """Dashboard management chat for business owners."""
     session_id = request.get("session_id") or str(uuid.uuid4())
     message = request.get("message", "")
     context = request.get("context", {})
     
-    # Business ID should come from authentication context in real implementation
-    business_id = context.get("business_id")
-    if not business_id:
-        return {"error": "Business authentication required", "session_id": session_id}
+    # Business ID comes from authentication context
+    business_id = current_business.id
+    context["business_id"] = business_id
 
     if not message.strip():
         return {"error": "Message cannot be empty", "session_id": session_id}
@@ -418,6 +421,7 @@ async def websocket_dashboard_chat(
     websocket: WebSocket, 
     business_id: int,
     session_id: str, 
+    current_business: Business = Depends(get_current_business),
     db: Session = Depends(get_db)
 ):
     """WebSocket for dashboard management chat."""

@@ -27,8 +27,8 @@ router = APIRouter()
 
 @router.get("/overview", response_model=BillingOverview)
 async def get_billing_overview(
-    db: Session = Depends(get_db),
-    business: Business = Depends(get_current_business)
+    business: Business = Depends(get_current_business),
+    db: Session = Depends(get_db)
 ) -> Any:
     """
     Get comprehensive billing overview for the business.
@@ -84,8 +84,8 @@ async def get_billing_overview(
 @router.get("/invoices", response_model=List[InvoiceResponse])
 async def get_billing_history(
     limit: int = Query(50, ge=1, le=100),
-    db: Session = Depends(get_db),
-    business: Business = Depends(get_current_business)
+    business: Business = Depends(get_current_business),
+    db: Session = Depends(get_db)
 ) -> Any:
     """
     Get billing history and past invoices.
@@ -124,8 +124,8 @@ async def get_billing_history(
 @router.get("/usage", response_model=UsageMetrics)
 async def get_usage_metrics(
     time_range: str = Query("current_month", regex="^(current_month|last_month|last_3_months|last_year)$"),
-    db: Session = Depends(get_db),
-    business: Business = Depends(get_current_business)
+    business: Business = Depends(get_current_business),
+    db: Session = Depends(get_db)
 ) -> Any:
     """
     Get detailed usage metrics for the business.
@@ -176,8 +176,8 @@ async def get_usage_metrics(
 async def add_payment_method(
     payment_method_id: str,
     set_as_default: bool = True,
-    db: Session = Depends(get_db),
-    business: Business = Depends(get_current_business)
+    business: Business = Depends(get_current_business),
+    db: Session = Depends(get_db)
 ) -> Any:
     """
     Add a new payment method to the business.
@@ -216,8 +216,8 @@ async def add_payment_method(
 
 @router.get("/payment-methods", response_model=List[PaymentMethodResponse])
 async def get_payment_methods(
-    db: Session = Depends(get_db),
-    business: Business = Depends(get_current_business)
+    business: Business = Depends(get_current_business),
+    db: Session = Depends(get_db)
 ) -> Any:
     """
     Get all payment methods for the business.
@@ -255,8 +255,8 @@ async def get_payment_methods(
 @router.delete("/payment-methods/{payment_method_id}")
 async def remove_payment_method(
     payment_method_id: str,
-    db: Session = Depends(get_db),
-    business: Business = Depends(get_current_business)
+    business: Business = Depends(get_current_business),
+    db: Session = Depends(get_db)
 ) -> Any:
     """
     Remove a payment method.
@@ -278,8 +278,8 @@ async def remove_payment_method(
 async def upgrade_subscription_plan(
     new_plan: SubscriptionPlan,
     payment_method_id: Optional[str] = None,
-    db: Session = Depends(get_db),
-    business: Business = Depends(get_current_business)
+    business: Business = Depends(get_current_business),
+    db: Session = Depends(get_db)
 ) -> Any:
     """
     Upgrade or change subscription plan.
@@ -333,8 +333,8 @@ async def upgrade_subscription_plan(
 @router.post("/cancel-subscription")
 async def cancel_subscription(
     cancel_at_period_end: bool = True,
-    db: Session = Depends(get_db),
-    business: Business = Depends(get_current_business)
+    business: Business = Depends(get_current_business),
+    db: Session = Depends(get_db)
 ) -> Any:
     """
     Cancel subscription.
@@ -374,8 +374,8 @@ async def cancel_subscription(
 
 @router.post("/reactivate-subscription")
 async def reactivate_subscription(
-    db: Session = Depends(get_db),
-    business: Business = Depends(get_current_business)
+    business: Business = Depends(get_current_business),
+    db: Session = Depends(get_db)
 ) -> Any:
     """
     Reactivate a cancelled subscription.
@@ -411,8 +411,8 @@ async def create_payment_intent(
     amount: float,
     currency: str = "usd",
     payment_method_id: Optional[str] = None,
-    db: Session = Depends(get_db),
-    business: Business = Depends(get_current_business)
+    business: Business = Depends(get_current_business),
+    db: Session = Depends(get_db)
 ) -> Any:
     """
     Create a payment intent for one-time payments.
@@ -470,8 +470,8 @@ async def stripe_webhook(
 
 @router.get("/usage-alerts")
 async def get_usage_alerts(
-    db: Session = Depends(get_db),
-    business: Business = Depends(get_current_business)
+    business: Business = Depends(get_current_business),
+    db: Session = Depends(get_db)
 ) -> Any:
     """
     Get usage alerts and warnings.

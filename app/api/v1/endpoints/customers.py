@@ -30,8 +30,8 @@ async def get_customers(
     search: Optional[str] = None,
     sort_by: str = Query("created_at", regex="^(name|email|phone_number|total_orders|last_order|created_at)$"),
     sort_order: str = Query("desc", regex="^(asc|desc)$"),
-    db: Session = Depends(get_db),
-    business: Business = Depends(get_current_business)
+    business: Business = Depends(get_current_business),
+    db: Session = Depends(get_db)
 ) -> Any:
     """
     Get all customers for the business with filtering and sorting.
@@ -90,8 +90,8 @@ async def get_customers(
 @router.get("/{customer_id}", response_model=CustomerProfile)
 async def get_customer(
     customer_id: int,
-    db: Session = Depends(get_db),
-    business: Business = Depends(get_current_business)
+    business: Business = Depends(get_current_business),
+    db: Session = Depends(get_db)
 ) -> Any:
     """
     Get detailed customer profile with analytics.
@@ -136,8 +136,8 @@ async def get_customer(
 @router.post("/", response_model=CustomerProfile)
 async def create_customer(
     customer_data: CustomerCreate,
-    db: Session = Depends(get_db),
-    business: Business = Depends(get_current_business)
+    business: Business = Depends(get_current_business),
+    db: Session = Depends(get_db)
 ) -> Any:
     """
     Create a new customer profile.
@@ -187,8 +187,8 @@ async def create_customer(
 async def update_customer(
     customer_id: int,
     customer_data: CustomerUpdate,
-    db: Session = Depends(get_db),
-    business: Business = Depends(get_current_business)
+    business: Business = Depends(get_current_business),
+    db: Session = Depends(get_db)
 ) -> Any:
     """
     Update customer profile.
@@ -247,8 +247,8 @@ async def update_customer(
 async def update_customer_preferences(
     customer_id: int,
     preferences: CustomerPreferences,
-    db: Session = Depends(get_db),
-    business: Business = Depends(get_current_business)
+    business: Business = Depends(get_current_business),
+    db: Session = Depends(get_db)
 ) -> Any:
     """
     Update customer preferences.
@@ -277,8 +277,8 @@ async def get_customer_orders(
     customer_id: int,
     skip: int = Query(0, ge=0),
     limit: int = Query(50, ge=1, le=100),
-    db: Session = Depends(get_db),
-    business: Business = Depends(get_current_business)
+    business: Business = Depends(get_current_business),
+    db: Session = Depends(get_db)
 ) -> Any:
     """
     Get customer order history.
@@ -318,8 +318,8 @@ async def get_customer_orders(
 async def get_customer_analytics(
     customer_id: int,
     time_range: str = Query("30d", regex="^(7d|30d|90d|1y)$"),
-    db: Session = Depends(get_db),
-    business: Business = Depends(get_current_business)
+    business: Business = Depends(get_current_business),
+    db: Session = Depends(get_db)
 ) -> Any:
     """
     Get customer analytics and behavior insights.
@@ -399,8 +399,8 @@ async def get_customer_analytics(
 @router.delete("/{customer_id}")
 async def delete_customer(
     customer_id: int,
-    db: Session = Depends(get_db),
-    business: Business = Depends(get_current_business)
+    business: Business = Depends(get_current_business),
+    db: Session = Depends(get_db)
 ) -> Any:
     """
     Delete customer (soft delete - marks as inactive).
@@ -427,8 +427,8 @@ async def delete_customer(
 @router.post("/{customer_id}/verify")
 async def verify_customer(
     customer_id: int,
-    db: Session = Depends(get_db),
-    business: Business = Depends(get_current_business)
+    business: Business = Depends(get_current_business),
+    db: Session = Depends(get_db)
 ) -> Any:
     """
     Mark customer as verified.
@@ -454,8 +454,8 @@ async def verify_customer(
 @router.get("/analytics/overview")
 async def get_customers_analytics_overview(
     time_range: str = Query("30d", regex="^(7d|30d|90d|1y)$"),
-    db: Session = Depends(get_db),
-    business: Business = Depends(get_current_business)
+    business: Business = Depends(get_current_business),
+    db: Session = Depends(get_db)
 ) -> Any:
     """
     Get overall customer analytics for the business.

@@ -50,8 +50,8 @@ class FoodQRCodeAnalytics(QRCodeAnalytics):
 async def get_food_qr_codes(
     type: Optional[QRCodeType] = Query(None, description="Filter by QR code type"),
     table_id: Optional[int] = Query(None, description="Filter by table ID"),
-    db: Session = Depends(get_db),
-    business: Business = Depends(get_current_business)
+    business: Business = Depends(get_current_business),
+    db: Session = Depends(get_db)
 ) -> Any:
     """
     Get existing QR codes for food service.
@@ -116,8 +116,8 @@ async def get_food_qr_codes(
 @router.post("/generate", response_model=QRCodeResponse)
 async def generate_food_qr_code(
     qr_data: QRCodeCreate,
-    db: Session = Depends(get_db),
-    business: Business = Depends(get_current_business)
+    business: Business = Depends(get_current_business),
+    db: Session = Depends(get_db)
 ) -> Any:
     """
     Generate new QR codes for food service.
@@ -230,8 +230,8 @@ async def bulk_generate_food_qr_codes(
     type: QRCodeType = Query(QRCodeType.TABLE, description="Type of QR codes to generate"),
     count: int = Query(10, description="Number of QR codes to generate"),
     template_id: str = Query("food_standard", description="Template to use"),
-    db: Session = Depends(get_db),
-    business: Business = Depends(get_current_business)
+    business: Business = Depends(get_current_business),
+    db: Session = Depends(get_db)
 ) -> Any:
     """
     Bulk generate QR codes for food service.
@@ -304,8 +304,8 @@ async def bulk_generate_food_qr_codes(
 async def get_food_qr_analytics(
     qr_id: str,
     time_range: str = Query("30d", regex="^(7d|30d|90d|1y)$"),
-    db: Session = Depends(get_db),
-    business: Business = Depends(get_current_business)
+    business: Business = Depends(get_current_business),
+    db: Session = Depends(get_db)
 ) -> Any:
     """
     Get QR code usage stats for food service.
@@ -358,8 +358,8 @@ async def get_food_qr_analytics(
 async def update_food_qr_code(
     qr_id: str,
     update_data: QRCodeUpdate,
-    db: Session = Depends(get_db),
-    business: Business = Depends(get_current_business)
+    business: Business = Depends(get_current_business),
+    db: Session = Depends(get_db)
 ) -> Any:
     """
     Update QR code configuration for food service.

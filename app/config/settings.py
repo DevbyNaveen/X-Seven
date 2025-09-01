@@ -56,6 +56,7 @@ class Settings(BaseSettings):
         "http://127.0.0.1:3000",
         "http://127.0.0.1:8000",
         "http://127.0.0.1:5500",
+        "http://localhost:8084",
     ]
     WEBSOCKET_ORIGINS: List[str] = [
         "ws://localhost:3000", 
@@ -132,6 +133,8 @@ class Settings(BaseSettings):
     # Supabase
     SUPABASE_URL: Optional[str] = None
     SUPABASE_API_KEY: Optional[str] = None
+    SUPABASE_JWT_SECRET: Optional[str] = None
+    SUPABASE_PROJECT_ID: Optional[str] = None
 
     
     

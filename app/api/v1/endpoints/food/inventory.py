@@ -68,8 +68,8 @@ class UsageFilter(BaseModel):
 async def get_food_inventory(
     low_stock_only: bool = Query(False, description="Show only low stock items"),
     category_id: Optional[int] = Query(None, description="Filter by category"),
-    db: Session = Depends(get_db),
-    business: Business = Depends(get_current_business)
+    business: Business = Depends(get_current_business),
+    db: Session = Depends(get_db)
 ) -> Any:
     """
     Get inventory with stock levels for food service.
@@ -114,8 +114,8 @@ async def get_food_inventory(
 async def update_food_inventory(
     item_id: int,
     update_data: InventoryUpdate,
-    db: Session = Depends(get_db),
-    business: Business = Depends(get_current_business)
+    business: Business = Depends(get_current_business),
+    db: Session = Depends(get_db)
 ) -> Any:
     """
     Update stock quantity for a menu item.
@@ -178,8 +178,8 @@ async def update_food_inventory(
 
 @router.get("/low-stock", response_model=List[LowStockItem])
 async def get_food_low_stock(
-    db: Session = Depends(get_db),
-    business: Business = Depends(get_current_business)
+    business: Business = Depends(get_current_business),
+    db: Session = Depends(get_db)
 ) -> Any:
     """
     Get items needing reorder.
@@ -209,9 +209,9 @@ async def get_food_low_stock(
 @router.post("/reorder", response_model=Dict[str, Any])
 async def create_reorder_request(
     reorder_request: ReorderRequest,
-    db: Session = Depends(get_db),
     business: Business = Depends(get_current_business),
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
 ) -> Any:
     """
     Create reorder request.
@@ -257,8 +257,8 @@ async def create_reorder_request(
 @router.get("/usage", response_model=List[UsageTracking])
 async def track_ingredient_usage(
     period: str = Query("7d", description="Period to track usage (7d, 30d, 90d)"),
-    db: Session = Depends(get_db),
-    business: Business = Depends(get_current_business)
+    business: Business = Depends(get_current_business),
+    db: Session = Depends(get_db)
 ) -> Any:
     """
     Track ingredient usage.

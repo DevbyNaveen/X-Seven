@@ -17,8 +17,8 @@ router = APIRouter()
 
 @router.get("/active", response_model=List[OrderResponse])
 async def get_active_orders(
-    db: Session = Depends(get_db),
-    business: Business = Depends(get_current_business)
+    business: Business = Depends(get_current_business),
+    db: Session = Depends(get_db)
 ) -> Any:
     """
     Get live pending/preparing orders for food service.
@@ -48,8 +48,8 @@ async def get_order_history(
     end_date: Optional[datetime] = Query(None, description="Filter orders before this date"),
     limit: int = Query(50, description="Maximum number of orders to return"),
     offset: int = Query(0, description="Number of orders to skip"),
-    db: Session = Depends(get_db),
-    business: Business = Depends(get_current_business)
+    business: Business = Depends(get_current_business),
+    db: Session = Depends(get_db)
 ) -> Any:
     """
     Get order history with filters.
@@ -75,9 +75,9 @@ async def get_order_history(
 @router.post("/", response_model=OrderResponse, status_code=status.HTTP_201_CREATED)
 async def create_food_order(
     order_data: OrderCreate,
-    db: Session = Depends(get_db),
     business: Business = Depends(get_current_business),
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
 ) -> Any:
     """
     Create new food order.
@@ -118,8 +118,8 @@ async def create_food_order(
 async def update_food_order_status(
     order_id: int,
     status_update: OrderStatusUpdate,
-    db: Session = Depends(get_db),
-    business: Business = Depends(get_current_business)
+    business: Business = Depends(get_current_business),
+    db: Session = Depends(get_db)
 ) -> Any:
     """
     Update food order status.
@@ -169,8 +169,8 @@ async def update_food_order_status(
 @router.get("/stats", response_model=Dict[str, Any])
 async def get_food_order_stats(
     period: str = Query("7d", description="Period for stats: 1d, 7d, 30d"),
-    db: Session = Depends(get_db),
-    business: Business = Depends(get_current_business)
+    business: Business = Depends(get_current_business),
+    db: Session = Depends(get_db)
 ) -> Any:
     """
     Get food order statistics.
@@ -219,8 +219,8 @@ async def get_food_order_stats(
 async def get_kitchen_queue(
     status: OrderStatus = Query(OrderStatus.PREPARING, description="Filter by order status"),
     limit: int = Query(20, description="Maximum number of orders to return"),
-    db: Session = Depends(get_db),
-    business: Business = Depends(get_current_business)
+    business: Business = Depends(get_current_business),
+    db: Session = Depends(get_db)
 ) -> Any:
     """
     Kitchen-specific order view.

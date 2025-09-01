@@ -26,8 +26,8 @@ router = APIRouter()
 @router.post("/create", response_model=BookingResponse)
 async def create_booking(
     booking_data: BookingCreate,
-    db: Session = Depends(get_db),
-    business: Business = Depends(get_current_business)
+    business: Business = Depends(get_current_business),
+    db: Session = Depends(get_db)
 ) -> Any:
     """
     Create a new table booking.
@@ -105,8 +105,8 @@ async def check_availability(
     date: datetime,
     party_size: int = Query(..., ge=1, le=20),
     duration: int = Query(120, ge=30, le=480),  # minutes
-    db: Session = Depends(get_db),
-    business: Business = Depends(get_current_business)
+    business: Business = Depends(get_current_business),
+    db: Session = Depends(get_db)
 ) -> Any:
     """
     Check table availability for a specific date and party size.
@@ -138,8 +138,8 @@ async def get_bookings(
     limit: int = Query(50, ge=1, le=100),
     status: Optional[BookingStatus] = None,
     date: Optional[datetime] = None,
-    db: Session = Depends(get_db),
-    business: Business = Depends(get_current_business)
+    business: Business = Depends(get_current_business),
+    db: Session = Depends(get_db)
 ) -> Any:
     """
     Get all bookings for the business with filtering.
@@ -185,8 +185,8 @@ async def get_bookings(
 @router.get("/{booking_id}", response_model=BookingResponse)
 async def get_booking(
     booking_id: int,
-    db: Session = Depends(get_db),
-    business: Business = Depends(get_current_business)
+    business: Business = Depends(get_current_business),
+    db: Session = Depends(get_db)
 ) -> Any:
     """
     Get detailed information about a specific booking.
@@ -230,8 +230,8 @@ async def get_booking(
 async def update_booking_status(
     booking_id: int,
     status: BookingStatus,
-    db: Session = Depends(get_db),
-    business: Business = Depends(get_current_business)
+    business: Business = Depends(get_current_business),
+    db: Session = Depends(get_db)
 ) -> Any:
     """
     Update booking status.
@@ -264,8 +264,8 @@ async def update_booking_status(
 async def cancel_booking(
     booking_id: int,
     reason: Optional[str] = None,
-    db: Session = Depends(get_db),
-    business: Business = Depends(get_current_business)
+    business: Business = Depends(get_current_business),
+    db: Session = Depends(get_db)
 ) -> Any:
     """
     Cancel a booking.
@@ -296,8 +296,8 @@ async def cancel_booking(
 @router.get("/analytics", response_model=BookingAnalytics)
 async def get_booking_analytics(
     time_range: str = Query("30d", regex="^(7d|30d|90d|1y)$"),
-    db: Session = Depends(get_db),
-    business: Business = Depends(get_current_business)
+    business: Business = Depends(get_current_business),
+    db: Session = Depends(get_db)
 ) -> Any:
     """
     Get booking analytics and insights.
@@ -345,8 +345,8 @@ async def get_booking_analytics(
 
 @router.get("/settings", response_model=BookingSettings)
 async def get_booking_settings(
-    db: Session = Depends(get_db),
-    business: Business = Depends(get_current_business)
+    business: Business = Depends(get_current_business),
+    db: Session = Depends(get_db)
 ) -> Any:
     """
     Get booking settings for the business.
@@ -373,8 +373,8 @@ async def get_booking_settings(
 @router.put("/settings", response_model=BookingSettings)
 async def update_booking_settings(
     settings: BookingSettings,
-    db: Session = Depends(get_db),
-    business: Business = Depends(get_current_business)
+    business: Business = Depends(get_current_business),
+    db: Session = Depends(get_db)
 ) -> Any:
     """
     Update booking settings for the business.
@@ -391,8 +391,8 @@ async def update_booking_settings(
 @router.post("/bulk-import")
 async def bulk_import_bookings(
     bookings: List[BookingCreate],
-    db: Session = Depends(get_db),
-    business: Business = Depends(get_current_business)
+    business: Business = Depends(get_current_business),
+    db: Session = Depends(get_db)
 ) -> Any:
     """
     Bulk import bookings from external systems.
@@ -445,8 +445,8 @@ async def bulk_import_bookings(
 @router.get("/calendar/{date}")
 async def get_calendar_view(
     date: datetime,
-    db: Session = Depends(get_db),
-    business: Business = Depends(get_current_business)
+    business: Business = Depends(get_current_business),
+    db: Session = Depends(get_db)
 ) -> Any:
     """
     Get calendar view of bookings for a specific date.
@@ -481,8 +481,8 @@ async def get_calendar_view(
 async def send_booking_reminder(
     booking_id: int,
     reminder_type: str = Query("24h", regex="^(1h|24h|1d)$"),
-    db: Session = Depends(get_db),
-    business: Business = Depends(get_current_business)
+    business: Business = Depends(get_current_business),
+    db: Session = Depends(get_db)
 ) -> Any:
     """
     Send booking reminder to customer.
@@ -513,8 +513,8 @@ async def send_booking_reminder(
 
 @router.get("/waitlist")
 async def get_waitlist(
-    db: Session = Depends(get_db),
-    business: Business = Depends(get_current_business)
+    business: Business = Depends(get_current_business),
+    db: Session = Depends(get_db)
 ) -> Any:
     """
     Get current waitlist for the business.
@@ -543,8 +543,8 @@ async def add_to_waitlist(
     customer_phone: str,
     party_size: int,
     estimated_wait: Optional[int] = None,
-    db: Session = Depends(get_db),
-    business: Business = Depends(get_current_business)
+    business: Business = Depends(get_current_business),
+    db: Session = Depends(get_db)
 ) -> Any:
     """
     Add customer to waitlist.

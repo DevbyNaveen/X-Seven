@@ -55,9 +55,9 @@ async def get_menu_items(
     category_id: Optional[int] = Query(None, description="Filter by category ID"),
     is_available: Optional[bool] = Query(None, description="Filter by availability"),
     search: Optional[str] = Query(None, description="Search by name or description"),
-    db: Session = Depends(get_db),
     current_business: Business = Depends(get_current_business),
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
 ) -> List[dict]:
     """Get all menu items with filtering options."""
     query = db.query(MenuItem).filter(MenuItem.business_id == current_business.id)
@@ -102,9 +102,9 @@ async def get_menu_items(
 @router.post("/items", response_model=dict, status_code=status.HTTP_201_CREATED)
 async def create_menu_item(
     item_data: MenuItemCreate,
-    db: Session = Depends(get_db),
     current_business: Business = Depends(get_current_business),
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
 ) -> dict:
     """Create a new menu item."""
     # Verify category exists for this business
@@ -156,9 +156,9 @@ async def create_menu_item(
 async def update_menu_item(
     item_id: int,
     item_data: MenuItemUpdate,
-    db: Session = Depends(get_db),
     current_business: Business = Depends(get_current_business),
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
 ) -> dict:
     """Update a menu item (price, availability, etc.)."""
     # Find menu item for this business
@@ -203,9 +203,9 @@ async def update_menu_item(
 @router.delete("/items/{item_id}", response_model=dict)
 async def delete_menu_item(
     item_id: int,
-    db: Session = Depends(get_db),
     current_business: Business = Depends(get_current_business),
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
 ) -> dict:
     """Remove a menu item."""
     # Find menu item for this business
@@ -230,9 +230,9 @@ async def delete_menu_item(
 
 @router.get("/categories", response_model=List[dict])
 async def get_menu_categories(
-    db: Session = Depends(get_db),
     current_business: Business = Depends(get_current_business),
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
 ) -> List[dict]:
     """Get all menu categories for the business."""
     categories = db.query(MenuCategory).filter(
@@ -253,9 +253,9 @@ async def get_menu_categories(
 @router.post("/categories", response_model=dict, status_code=status.HTTP_201_CREATED)
 async def create_menu_category(
     category_data: MenuCategoryCreate,
-    db: Session = Depends(get_db),
     current_business: Business = Depends(get_current_business),
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
 ) -> dict:
     """Create a new menu category."""
     # Check if category with same name already exists for this business
@@ -292,9 +292,9 @@ async def create_menu_category(
 async def update_menu_category(
     category_id: int,
     category_data: MenuCategoryUpdate,
-    db: Session = Depends(get_db),
     current_business: Business = Depends(get_current_business),
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
 ) -> dict:
     """Update a menu category."""
     # Find category for this business
@@ -328,9 +328,9 @@ async def update_menu_category(
 @router.delete("/categories/{category_id}", response_model=dict)
 async def delete_menu_category(
     category_id: int,
-    db: Session = Depends(get_db),
     current_business: Business = Depends(get_current_business),
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
 ) -> dict:
     """Delete a menu category."""
     # Find category for this business
@@ -368,9 +368,9 @@ async def delete_menu_category(
 async def toggle_item_availability(
     item_id: int,
     availability_data: MenuItemAvailabilityUpdate,
-    db: Session = Depends(get_db),
     current_business: Business = Depends(get_current_business),
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
 ) -> dict:
     """Toggle item availability."""
     # Find menu item for this business

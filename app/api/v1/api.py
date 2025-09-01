@@ -3,9 +3,9 @@ from fastapi import APIRouter
 from app.api.v1.endpoints import (
     auth,
     business,
-    orders,
     central_chat_endpoints as central_chat,
-    global_chat_endpoints as global_chat
+    global_chat_endpoints as global_chat,
+    supabase_auth
 )
 from app.api.v1.endpoints.dashboard import business_dashboard as dashboard
 from app.api.v1.endpoints.food import menu as food_menu, order as food_order, table as food_table, inventory as food_inventory, qr as food_qr
@@ -19,8 +19,16 @@ from app.api.v1.endpoints.AREndpoints.business_intelligence import router as bus
 api_router = APIRouter()
 
 # Include only essential endpoint routers
+# Include authentication endpoints
+# Note: Both auth and supabase_auth use the same prefix but handle different auth flows
 api_router.include_router(
     auth.router,
+    prefix="/auth",
+    tags=["Authentication"]
+)
+
+api_router.include_router(
+    supabase_auth.router,
     prefix="/auth",
     tags=["Authentication"]
 )
@@ -29,12 +37,6 @@ api_router.include_router(
     business.router,
     prefix="/business",
     tags=["Business Management"]
-)
-
-api_router.include_router(
-    orders.router,
-    prefix="/orders",
-    tags=["Order Management"]
 )
 
 api_router.include_router(

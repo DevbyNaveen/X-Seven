@@ -26,6 +26,7 @@ from app.services.ai.dashboardAI.Food.category_manager import CategoryManager
 from app.services.ai.dashboardAI.Food.menu_manager import MenuManager
 from app.services.ai.dashboardAI.Food.order_manager import OrderManager
 from app.services.ai.dashboardAI.Food.inventory_manager import InventoryManager
+from app.services.ai.dashboardAI.Food.reports_manager import ReportsManager
 
 if TYPE_CHECKING:
     from app.services.ai.centralAI.central_ai_handler import CentralAIHandler, ChatType, UnifiedContext
@@ -41,6 +42,7 @@ class DashboardFeature(str, Enum):
     ANALYTICS = "analytics"
     STAFF = "staff"
     CUSTOMERS = "customers"
+    REPORTS = "reports"
 
 
 class DashboardAIHandler:
@@ -64,6 +66,7 @@ class DashboardAIHandler:
         self.menu_manager = MenuManager(db)
         self.order_manager = OrderManager(db)
         self.inventory_manager = InventoryManager(db)
+        self.reports_manager = ReportsManager(db)
     
     async def handle_dashboard_request(
         self,
@@ -275,8 +278,8 @@ You are assisting the business owner/manager with dashboard management tasks. Re
 
 First, extract the user's intent in JSON format:
 {
-  "domain": "category|menu|order|inventory",
-  "action": "add_category|list_categories|update_category|delete_category|add_item|list_menu|update_item|delete_item|list_orders|view_order|update_order_status|cancel_order|list_inventory|update_stock|low_stock_report",
+  "domain": "category|menu|order|inventory|reports",
+  "action": "add_category|list_categories|update_category|delete_category|add_item|list_menu|update_item|delete_item|list_orders|view_order|update_order_status|cancel_order|list_inventory|update_stock|low_stock_report|get_daily_summary|get_weekly_performance|get_monthly_comprehensive|get_sales_report|get_customer_insights|get_financial_report|get_operational_report|get_growth_analysis|generate_custom_report|export_business_data|schedule_report|get_report_templates|generate_report_from_template",
   "data": {
     // Action-specific parameters
   }
@@ -308,11 +311,39 @@ Response Guidelines:
    - update_stock: Update stock levels or reorder points
    - low_stock_report: Show items needing reorder
 
+5. For reports requests:
+   - get_daily_summary: Generate daily business summary
+   - get_weekly_performance: Generate weekly performance report
+   - get_monthly_comprehensive: Generate comprehensive monthly report
+   - get_sales_report: Generate sales report for different periods
+   - get_customer_insights: Generate customer behavior analysis
+   - get_financial_report: Generate financial performance report
+   - get_operational_report: Generate operational efficiency metrics
+   - get_growth_analysis: Generate business growth analysis
+   - generate_custom_report: Generate custom report with specific parameters
+   - export_business_data: Export business data in specified format
+   - schedule_report: Schedule recurring reports
+   - get_report_templates: Get available report templates
+   - generate_report_from_template: Generate report from predefined template
+
 Examples:
 - To add a category: {"domain": "category", "action": "add_category", "data": {"name": "Appetizers", "description": "Starters and small plates"}}
 - To add a menu item: {"domain": "menu", "action": "add_item", "data": {"name": "Caesar Salad", "price": 8.99, "description": "Fresh romaine with parmesan", "category_name": "Salads"}}
 - To update stock: {"domain": "inventory", "action": "update_stock", "data": {"item_name": "Tomatoes", "quantity": 50, "reorder_level": 20}}
 - To list orders: {"domain": "order", "action": "list_orders", "data": {"status": "pending"}}
+- To get daily summary: {"domain": "reports", "action": "get_daily_summary", "data": {}}
+- To get weekly performance: {"domain": "reports", "action": "get_weekly_performance", "data": {}}
+- To get monthly report: {"domain": "reports", "action": "get_monthly_comprehensive", "data": {"months": 1}}
+- To get sales report: {"domain": "reports", "action": "get_sales_report", "data": {"period": "weekly"}}
+- To get customer insights: {"domain": "reports", "action": "get_customer_insights", "data": {}}
+- To get financial report: {"domain": "reports", "action": "get_financial_report", "data": {}}
+- To get operational report: {"domain": "reports", "action": "get_operational_report", "data": {}}
+- To get growth analysis: {"domain": "reports", "action": "get_growth_analysis", "data": {"months": 6}}
+- To generate custom report: {"domain": "reports", "action": "generate_custom_report", "data": {"report_type": "custom", "start_date": "2023-01-01", "end_date": "2023-01-31", "format": "pdf"}}
+- To export data: {"domain": "reports", "action": "export_business_data", "data": {"data_type": "orders", "start_date": "2023-01-01", "end_date": "2023-01-31", "format": "csv"}}
+- To schedule report: {"domain": "reports", "action": "schedule_report", "data": {"report_type": "daily_summary", "frequency": "daily", "format": "pdf", "email": "manager@business.com"}}
+- To get templates: {"domain": "reports", "action": "get_report_templates", "data": {}}
+- To generate from template: {"domain": "reports", "action": "generate_report_from_template", "data": {"template_id": "daily_summary", "start_date": "2023-01-01", "end_date": "2023-01-31", "format": "pdf"}}
 
 Response Format:
 1. First provide the JSON intent block
@@ -399,6 +430,8 @@ I'll add the 'Desserts' category to your menu right away.
                 return await self.order_manager.handle_order_request(business_id, intent)
             elif domain == "inventory":
                 return await self.inventory_manager.handle_inventory_request(business_id, intent)
+            elif domain == "reports":
+                return await self.reports_manager.handle_reports_request(business_id, intent)
             else:
                 return None
         except Exception as e:

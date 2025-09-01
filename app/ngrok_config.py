@@ -61,6 +61,12 @@ def get_cors_config():
         "http://localhost:3001",
         "http://127.0.0.1:3001",
         "http://localhost:8080",
+        "http://localhost:8084",
+        "http://localhost:8085",
+        "http://127.0.0.1:8085",
+        "http://localhost:8088",
+        "http://192.168.67.1:8080",
+        "http://192.168.67.1:8083",
         "https://*.v0.dev",
         "https://v0.dev",
     ]

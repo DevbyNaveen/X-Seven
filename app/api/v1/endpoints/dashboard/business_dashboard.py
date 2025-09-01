@@ -9,6 +9,7 @@ from app.config.database import get_db
 from app.core.dependencies import get_current_business, get_current_user
 from app.models import Business, Order, Message, User, OrderStatus
 from app.services.websocket.connection_manager import manager
+from app.core.supabase_auth import refresh_jwks_cache
 
 router = APIRouter()
 
@@ -16,9 +17,9 @@ router = APIRouter()
 @router.get("/{business_id}", response_model=dict)
 async def get_business_details(
     business_id: int,
-    db: Session = Depends(get_db),
     current_business: Business = Depends(get_current_business),
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
 ) -> Any:
     """Get current business details."""
     # Verify business access
@@ -52,9 +53,9 @@ async def get_business_details(
 @router.get("/{business_id}/dashboard", response_model=dict)
 async def get_business_dashboard(
     business_id: int,
-    db: Session = Depends(get_db),
     current_business: Business = Depends(get_current_business),
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
 ) -> Any:
     """Get dashboard overview data."""
     # Verify business access
@@ -126,9 +127,9 @@ async def get_business_dashboard(
 async def get_business_stats(
     business_id: int,
     period: str = "7d",  # 1d, 7d, 30d
-    db: Session = Depends(get_db),
     current_business: Business = Depends(get_current_business),
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
 ) -> Any:
     """Get real-time business statistics."""
     # Verify business access
@@ -199,9 +200,9 @@ async def get_business_stats(
 async def update_business_config(
     business_id: int,
     config_data: Dict[str, Any],
-    db: Session = Depends(get_db),
     current_business: Business = Depends(get_current_business),
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
 ) -> Any:
     """Update business configuration."""
     # Verify business access
@@ -419,3 +420,10 @@ async def get_live_orders(
         }
         for order in orders
     ]
+
+
+@router.post("/test-refresh-jwks")
+async def test_refresh_jwks():
+    """Test endpoint to manually refresh JWKS cache."""
+    success = refresh_jwks_cache()
+    return {"success": success, "message": "JWKS cache refreshed" if success else "Failed to refresh JWKS cache"}
