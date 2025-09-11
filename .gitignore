@@ -119,4 +119,4 @@ Desktop.ini
 
 # Local configuration
 config.local.py
-settings.local.py
+settings.local.py.env
