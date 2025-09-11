@@ -56,12 +56,15 @@ async def general_exception_handler(request: Request, exc: Exception):
     )
 
 
-# Root endpoint with OPTIONS handler
-@app.api_route("/", methods=["GET", "OPTIONS"])
+# Root endpoint with OPTIONS and HEAD handler
+@app.api_route("/", methods=["GET", "HEAD", "OPTIONS"])
 async def root(request: Request):
-    """Root endpoint with CORS support."""
+    """Root endpoint with CORS and health check support."""
     if request.method == "OPTIONS":
         return JSONResponse(status_code=200, content={"method": "OPTIONS"})
+    
+    if request.method == "HEAD":
+        return JSONResponse(status_code=200, content={})
     
     return {
         "name": settings.PROJECT_NAME,
