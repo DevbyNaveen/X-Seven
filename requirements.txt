@@ -21,8 +21,8 @@ PyJWT==2.8.0
 celery
 redis
 
-# HTTP Client
-httpx==0.27.2
+# HTTP Client - Fixed for supabase compatibility
+httpx>=0.24.0,<0.26.0
 
 # AI & LLM
 openai==1.12.0
