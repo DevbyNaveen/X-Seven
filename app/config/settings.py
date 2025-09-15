@@ -41,12 +41,8 @@ class Settings(BaseSettings):
     # Redis
     REDIS_URL: str = "redis://localhost:6379"
     
-    # Security
+    # Security - Now using Supabase tokens only
     SECRET_KEY: str = "dev-secret-change-me"
-    ALGORITHM: str = "HS256"
-    ACCESS_TOKEN_EXPIRE_MINUTES: int = 30
-    # Refresh tokens are long-lived
-    REFRESH_TOKEN_EXPIRE_DAYS: int = 7
     
     # CORS
     BACKEND_CORS_ORIGINS: List[str] = [
@@ -132,17 +128,21 @@ class Settings(BaseSettings):
     
     # Supabase
     SUPABASE_URL: Optional[str] = None
-    SUPABASE_API_KEY: Optional[str] = None
+    SUPABASE_KEY: Optional[str] = None  # Legacy key (often anon)
+    SUPABASE_SERVICE_ROLE_KEY: Optional[str] = None  # Preferred server‑side key for table access
+    SUPABASE_API_KEY: Optional[str] = None  # Legacy fallback
     SUPABASE_JWT_SECRET: Optional[str] = None
     SUPABASE_PROJECT_ID: Optional[str] = None
 
     
     
-    # Modern Pydantic configuration
+    # Modern Pydantic configuration - ignore extra fields
+    # Load environment variables from .env; extra fields are ignored.
     model_config = SettingsConfigDict(
         env_file=".env",
         case_sensitive=False,
-        env_file_encoding='utf-8'
+        env_file_encoding='utf-8',
+        extra="ignore"  # Ignore extra environment variables
     )
 
 

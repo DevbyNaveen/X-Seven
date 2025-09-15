@@ -1,208 +1,224 @@
-from fastapi import APIRouter, Depends, HTTPException, status, Header
-from sqlalchemy.orm import Session
-from typing import Any, Optional
-import jwt
+"""
+Direct Supabase registration endpoint - handles business registration 
+and user creation with JWT token return.
+"""
+from fastapi import APIRouter, HTTPException, status, Depends
+from typing import Any
+import uuid
 import logging
-import requests
-from jose import JWTError
+from datetime import datetime
 
-from app.config.database import get_db
-from app.config.settings import settings
-from app.models import User, Business
-from app.schemas.auth import Token
-from app.core.security import create_access_token, create_refresh_token
-from datetime import timedelta
+from app.config.database import get_supabase_client
+from app.schemas.auth import RegisterBusinessRequest, TokenResponse, LoginRequest
 
 router = APIRouter()
 
-async def verify_supabase_token(supabase_token: str, db: Session) -> dict:
+@router.post("/supabase/register", status_code=status.HTTP_201_CREATED, response_model=TokenResponse)
+async def direct_supabase_register(
+    request: RegisterBusinessRequest,
+    supabase = Depends(get_supabase_client)
+) -> Any:
     """
-    Verify Supabase JWT token using Supabase's GoTrue service
+    Direct Supabase registration - creates both business record and admin user,
+    then returns a JWT token for immediate authentication.
+    
+    This endpoint allows users to register their business and get authenticated
+    immediately with a JWT token.
+    
+    Returns: JWT token and user/business details for immediate use
     """
     try:
-        # For production, you should verify the token with Supabase's GoTrue service
-        # This is a simplified version that decodes the token
-        
-        # Get the Supabase JWT secret (you need to get this from your Supabase dashboard)
-        supabase_jwt_secret = getattr(settings, 'SUPABASE_JWT_SECRET', None)
-        
-        if not supabase_jwt_secret:
-            # Fallback to using the public key for basic verification
-            # In production, use the JWT secret from Supabase dashboard
-            supabase_jwt_secret = settings.SUPABASE_API_KEY
+        # Check if business slug already exists
+        business_response = supabase.table("businesses").select("*").eq("slug", request.business_slug).execute()
+        if business_response.data:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Business slug already exists"
+            )
+
+        # Check if business with this email already exists
+        email_business_response = supabase.table("businesses").select("*").eq("contact_info->>email", request.admin_email).execute()
+        if email_business_response.data:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Business with this email already exists"
+            )
+
+        # Create Supabase auth user
+        try:
+            auth_response = supabase.auth.sign_up({
+                "email": request.admin_email,
+                "password": request.admin_password,
+                "options": {
+                    "data": {
+                        "full_name": request.admin_name,
+                        "phone": request.admin_phone
+                    }
+                }
+            })
             
-        if not supabase_jwt_secret:
+            if not auth_response or not auth_response.user:
+                raise HTTPException(
+                    status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                    detail="Failed to create auth user"
+                )
+                
+            user_id = auth_response.user.id
+            
+        except Exception as auth_error:
+            logging.error(f"Error creating Supabase auth user: {auth_error}")
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail="Supabase JWT configuration missing"
+                detail="Failed to create user account"
             )
-        
-        # Decode the token
-        payload = jwt.decode(supabase_token, supabase_jwt_secret, algorithms=["HS256"])
-        return payload
-        
-    except jwt.ExpiredSignatureError:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Supabase token expired",
-            headers={"WWW-Authenticate": "Bearer"},
-        )
-    except jwt.InvalidTokenError:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid Supabase token",
-            headers={"WWW-Authenticate": "Bearer"},
-        )
-    except Exception as e:
-        logging.error(f"Error verifying Supabase token: {e}")
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Could not verify Supabase token",
-            headers={"WWW-Authenticate": "Bearer"},
-        )
 
-@router.post("/supabase/login", response_model=Token)
-async def login_with_supabase_token(
-    authorization: Optional[str] = Header(None),
-    db: Session = Depends(get_db)
-) -> Any:
-    """
-    Login using a Supabase JWT token from Authorization header and map to existing user system
-    """
-    if not authorization or not authorization.startswith("Bearer "):
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Authorization header with Bearer token required",
-            headers={"WWW-Authenticate": "Bearer"},
-        )
-    
-    supabase_token = authorization.split("Bearer ")[1]
-    
-    # Verify the Supabase token
-    payload = await verify_supabase_token(supabase_token, db)
-    
-    # Extract user info from Supabase token
-    supabase_user_id = payload.get("sub")
-    email = payload.get("email")
-    
-    if not email:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Email not found in Supabase token"
-        )
-    
-    # Find user in your system
-    user = db.query(User).filter(User.email == email).first()
-    
-    # If user doesn't exist, you might want to create them
-    # This depends on your business logic
-    if not user:
-        # For now, we'll raise an error
-        # You can modify this to auto-create users if needed
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="User not found in system. Please register first."
-        )
-    
-    # Check if user is active
-    if not user.is_active:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Inactive user"
-        )
-    
-    # Create your internal tokens
-    access_token_expires = timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
-    access_token = create_access_token(
-        data={"sub": user.email, "business_id": user.business_id, "supabase_uid": supabase_user_id},
-        expires_delta=access_token_expires,
-    )
-    refresh_token = create_refresh_token(data={"sub": user.email, "business_id": user.business_id, "supabase_uid": supabase_user_id})
-    
-    return Token(
-        access_token=access_token,
-        token_type="bearer",
-        business_id=user.business_id,
-        user_role=user.role,
-        refresh_token=refresh_token,
-    )
-
-@router.post("/supabase/register", response_model=Token, status_code=status.HTTP_201_CREATED)
-async def register_with_supabase(
-    email: str,
-    name: str,
-    business_name: str,
-    business_slug: str,
-    supabase_user_id: str,
-    db: Session = Depends(get_db)
-) -> Any:
-    """
-    Register a new user and business with Supabase user ID
-    """
-    from app.core.exceptions import DuplicateError
-    from app.models import UserRole, SubscriptionPlan
-    
-    # Check if business slug already exists
-    existing_business = db.query(Business).filter(
-        Business.slug == business_slug
-    ).first()
-    
-    if existing_business:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Business slug already exists"
-        )
-    
-    # Check if email already exists
-    existing_user = db.query(User).filter(
-        User.email == email
-    ).first()
-    
-    if existing_user:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="User with this email already exists"
-        )
-    
-    # Create business with trial access
-    business = Business(
-        name=business_name,
-        slug=business_slug,
-        subscription_plan=SubscriptionPlan.BASIC,  # Start with basic plan (trial)
-        subscription_status="trial",  # Mark as trial
-        is_active=True,
-        contact_info={
-            "email": email
+        # Create business with trial access
+        business_id = str(uuid.uuid4())
+        business_data = {
+            "id": business_id,
+            "name": request.business_name,
+            "slug": request.business_slug,
+            "subscription_plan": "basic",
+            "subscription_status": "trial",
+            "is_active": True,
+            "contact_info": {"email": request.admin_email},
+            "category": request.business_category.value if request.business_category else None,
+            "created_at": datetime.utcnow().isoformat(),
+            "updated_at": datetime.utcnow().isoformat()
         }
-    )
-    db.add(business)
-    db.commit()
-    db.refresh(business)
+
+        business_response = supabase.table("businesses").insert(business_data).execute()
+        if not business_response.data:
+            # Try to clean up the auth user if business creation fails
+            try:
+                supabase.auth.admin.delete_user(user_id)
+            except Exception as cleanup_error:
+                logging.error(f"Failed to cleanup auth user after business creation failure: {cleanup_error}")
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Failed to create business"
+            )
+
+        # Update business with owner info
+        business_update_data = {
+            "owner_id": user_id,
+            "updated_at": datetime.utcnow().isoformat()
+        }
+        
+        business_update_response = supabase.table("businesses").update(business_update_data).eq("id", business_id).execute()
+        if not business_update_response.data:
+            # Try to clean up both auth user and business if update fails
+            try:
+                supabase.auth.admin.delete_user(user_id)
+                supabase.table("businesses").delete().eq("id", business_id).execute()
+            except Exception as cleanup_error:
+                logging.error(f"Failed to cleanup after business update failure: {cleanup_error}")
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Failed to update business with owner info"
+            )
+
+        # Sign in the user to get JWT token
+        try:
+            sign_in_response = supabase.auth.sign_in_with_password({
+                "email": request.admin_email,
+                "password": request.admin_password
+            })
+            
+            if not sign_in_response or not sign_in_response.session:
+                raise HTTPException(
+                    status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                    detail="Failed to authenticate user after registration"
+                )
+                
+            session = sign_in_response.session
+            
+        except Exception as sign_in_error:
+            logging.error(f"Error signing in user after registration: {sign_in_error}")
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Failed to authenticate user after registration"
+            )
+
+        # Return token response
+        return {
+            "access_token": session.access_token,
+            "token_type": "bearer",
+            "user_id": str(user_id),
+            "email": request.admin_email,
+            "role": "owner",
+            "business_id": business_id,
+            "expires_in": session.expires_in
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logging.error(f"Error in direct registration: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Registration failed"
+        )
+
+@router.post("/supabase/login", status_code=status.HTTP_200_OK, response_model=TokenResponse)
+async def supabase_login(
+    request: LoginRequest,
+    supabase = Depends(get_supabase_client)
+) -> Any:
+    """
+    Login endpoint that authenticates user with Supabase Auth and returns JWT token.
     
-    # Create user
-    user = User(
-        email=email,
-        name=name,
-        role=UserRole.OWNER,
-        business_id=business.id,
-        is_active=True
-    )
-    db.add(user)
-    db.commit()
-    db.refresh(user)
-    
-    # Create tokens
-    access_token_expires = timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
-    access_token = create_access_token(
-        data={"sub": user.email, "business_id": business.id, "supabase_uid": supabase_user_id},
-        expires_delta=access_token_expires,
-    )
-    refresh_token = create_refresh_token(data={"sub": user.email, "business_id": business.id, "supabase_uid": supabase_user_id})
-    
-    return Token(
-        access_token=access_token,
-        token_type="bearer",
-        business_id=business.id,
-        user_role=user.role,
-        refresh_token=refresh_token,
-    )
+    Returns: JWT token and user details for authenticated requests
+    """
+    try:
+        # Authenticate user with Supabase
+        try:
+            auth_response = supabase.auth.sign_in_with_password({
+                "email": request.email,
+                "password": request.password
+            })
+            
+            if not auth_response or not auth_response.session:
+                raise HTTPException(
+                    status_code=status.HTTP_401_UNAUTHORIZED,
+                    detail="Invalid credentials"
+                )
+                
+            session = auth_response.session
+            user = auth_response.user
+            
+        except Exception as auth_error:
+            logging.error(f"Error authenticating user: {auth_error}")
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Invalid credentials"
+            )
+
+        # Get business details for the user
+        try:
+            business_response = supabase.table("businesses").select("*").eq("owner_id", user.id).execute()
+            business_data = business_response.data[0] if business_response.data else None
+            
+        except Exception as business_error:
+            logging.error(f"Error fetching business details: {business_error}")
+            business_data = None
+
+        # Return token response
+        return {
+            "access_token": session.access_token,
+            "token_type": "bearer",
+            "user_id": str(user.id),
+            "email": user.email,
+            "role": "owner" if business_data else "user",
+            "business_id": business_data.get("id") if business_data else None,
+            "expires_in": session.expires_in
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logging.error(f"Error in login: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Login failed"
+        )

@@ -5,7 +5,6 @@ from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session
 from app.config.database import get_db
 from app.config.settings import settings
-from app.config.database import engine, Base
 from app.config.logging import get_logger
 from app.api.v1.api import api_router
 from app.core.middleware import (

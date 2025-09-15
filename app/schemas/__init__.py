@@ -25,7 +25,7 @@ This package contains all Pydantic models for request/response validation:
 from app.schemas.base import BaseSchema, BaseResponse
 
 # Authentication schemas
-from app.schemas.auth import Token, RegisterBusinessRequest, LoginRequest
+from app.schemas.auth import RegisterBusinessRequest, TokenResponse
 
 # Business schemas
 from app.schemas.business import (
@@ -161,9 +161,8 @@ __all__ = [
     "BaseResponse",
     
     # Auth
-    "Token",
+    "TokenResponse",
     "RegisterBusinessRequest",
-    "LoginRequest",
     
     # Business
     "BusinessCreate",

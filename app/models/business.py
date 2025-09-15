@@ -1,8 +1,8 @@
-"""Updated Business model with phone number configuration."""
-from sqlalchemy import Column, String, JSON, Boolean, Enum as SQLEnum, DateTime, Float
-from sqlalchemy.orm import relationship
+"""Business model for Supabase operations."""
 import enum
-from app.models.base import BaseModel
+from typing import Dict, Any, Optional, List
+from datetime import datetime
+from app.models.base import SupabaseModel
 
 
 class SubscriptionPlan(str, enum.Enum):
@@ -28,124 +28,54 @@ class BusinessCategory(str, enum.Enum):
     LOCAL_SERVICES = "local_services"  # Cleaning, pet care, tutoring
 
 
-class Business(BaseModel):
+class Business(SupabaseModel):
     """
-    Updated Business model with phone configuration and category support.
+    Business model with phone configuration and category support.
     """
-    __tablename__ = "businesses"
+    table_name = "businesses"
     
-    # Basic Information (existing fields)
-    name = Column(String(255), nullable=False)
-    slug = Column(String(255), unique=True, index=True, nullable=False)
-    description = Column(String(500))
+    # Basic Information
+    name: str
+    slug: str
+    description: Optional[str] = None
     
-    # NEW: Business Category
-    category = Column(
-        SQLEnum(BusinessCategory),
-        nullable=True,
-        index=True
-    )
+    # Business Category
+    category: Optional[str] = None
     
     # Category-specific configuration
-    category_config = Column(JSON, default=dict)
-    # Example configurations for each category:
-    # FOOD_HOSPITALITY: {
-    #   "has_tables": true,
-    #   "has_kitchen": true,
-    #   "delivery_available": true,
-    #   "qr_ordering": true,
-    #   "reservation_system": true
-    # }
-    # BEAUTY_PERSONAL_CARE: {
-    #   "has_stylists": true,
-    #   "appointment_duration": 60,
-    #   "deposit_required": true,
-    #   "service_categories": ["hair", "nails", "massage"]
-    # }
-    # AUTOMOTIVE_SERVICES: {
-    #   "has_service_bays": true,
-    #   "parts_management": true,
-    #   "vehicle_types": ["car", "motorcycle"],
-    #   "emergency_service": true
-    # }
-    # HEALTH_MEDICAL: {
-    #   "has_doctors": true,
-    #   "insurance_accepted": true,
-    #   "emergency_available": true,
-    #   "specialties": ["general", "dental", "veterinary"]
-    # }
-    # LOCAL_SERVICES: {
-    #   "mobile_service": true,
-    #   "service_area": "10km",
-    #   "recurring_available": true,
-    #   "equipment_required": true
-    # }
+    category_config: Dict[str, Any] = {}
     
     # Subscription
-    subscription_plan = Column(
-        SQLEnum(SubscriptionPlan),
-        default=SubscriptionPlan.BASIC,
-        nullable=False
-    )
-    subscription_status = Column(String(50), default="active")  # active, cancelled, past_due, etc.
-    is_active = Column(Boolean, default=True, nullable=False)
-    trial_ends_at = Column(DateTime(timezone=True))
+    subscription_plan: str = "basic"
+    subscription_status: str = "active"
+    is_active: bool = True
+    trial_ends_at: Optional[datetime] = None
     
     # Stripe Integration
-    stripe_customer_id = Column(String(100), index=True)
-    stripe_subscription_id = Column(String(100), index=True)
+    stripe_customer_id: Optional[str] = None
+    stripe_subscription_id: Optional[str] = None
     
-    # NEW: Phone Number Configuration
-    phone_config = Column(
-        SQLEnum(PhoneNumberType),
-        default=PhoneNumberType.UNIVERSAL_ONLY,
-        nullable=False
-    )
+    # Phone Number Configuration
+    phone_config: str = "universal_only"
     
-    # NEW: Custom phone numbers (if applicable)
-    custom_phone_number = Column(String(20))  # Their dedicated number
-    custom_whatsapp_number = Column(String(20))  # WhatsApp Business number
-    custom_phone_sid = Column(String(50))  # Twilio SID for the number
+    # Custom phone numbers
+    custom_phone_number: Optional[str] = None
+    custom_whatsapp_number: Optional[str] = None
+    custom_phone_sid: Optional[str] = None
     
-    # NEW: Phone features
-    phone_features = Column(JSON, default=dict)
-    # Example: {
-    #   "voice_enabled": true,
-    #   "whatsapp_enabled": false,
-    #   "sms_enabled": true,
-    #   "transfer_to_human": true,
-    #   "business_hours_only": false,
-    #   "voice_personality": "friendly",
-    #   "monthly_minutes_limit": 1000
-    # }
+    # Phone features
+    phone_features: Dict[str, Any] = {}
     
-    # NEW: Phone usage tracking
-    phone_usage = Column(JSON, default=dict)
-    # Example: {
-    #   "voice_minutes_used": 450,
-    #   "sms_sent": 1200,
-    #   "whatsapp_messages": 3400,
-    #   "last_reset_date": "2024-01-01"
-    # }
+    # Phone usage tracking
+    phone_usage: Dict[str, Any] = {}
     
-    # NEW: Custom number pricing
-    custom_number_monthly_cost = Column(Float, default=0.0)
+    # Custom number pricing
+    custom_number_monthly_cost: float = 0.0
     
-    # Existing fields...
-    settings = Column(JSON, default=dict)
-    branding_config = Column(JSON, default=dict)
-    contact_info = Column(JSON, default=dict)
-    
-    # Relationships
-    users = relationship("User", back_populates="business", cascade="all, delete-orphan")
-    menu_categories = relationship("MenuCategory", back_populates="business", cascade="all, delete-orphan")
-    menu_items = relationship("MenuItem", back_populates="business", cascade="all, delete-orphan")
-    tables = relationship("Table", back_populates="business", cascade="all, delete-orphan")
-    orders = relationship("Order", back_populates="business", cascade="all, delete-orphan")
-    phone_numbers = relationship("PhoneNumber", back_populates="business", cascade="all, delete-orphan")
-    waitlist_entries = relationship("WaitlistEntry", back_populates="business", cascade="all, delete-orphan")
-    service_providers = relationship("ServiceProvider", back_populates="business", cascade="all, delete-orphan")
-    appointments = relationship("Appointment", back_populates="business", cascade="all, delete-orphan")
+    # Configuration fields
+    settings: Dict[str, Any] = {}
+    branding_config: Dict[str, Any] = {}
+    contact_info: Dict[str, Any] = {}
     
     def __repr__(self):
         return f"<Business {self.name} ({self.category}) - {self.subscription_plan}>"

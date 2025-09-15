@@ -18,15 +18,7 @@ from app.api.v1.endpoints.AREndpoints.business_intelligence import router as bus
 # Create main router
 api_router = APIRouter()
 
-# Include only essential endpoint routers
-# Include authentication endpoints
-# Note: Both auth and supabase_auth use the same prefix but handle different auth flows
-api_router.include_router(
-    auth.router,
-    prefix="/auth",
-    tags=["Authentication"]
-)
-
+# Include only Supabase authentication endpoints
 api_router.include_router(
     supabase_auth.router,
     prefix="/auth",

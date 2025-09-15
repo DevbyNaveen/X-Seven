@@ -1,28 +1,9 @@
-"""Database configuration and session management."""
-from sqlalchemy import create_engine
-from sqlalchemy.ext.declarative import declarative_base
-from sqlalchemy.orm import sessionmaker
-from sqlalchemy.orm import Session
-from typing import Generator, Optional
+"""Supabase database configuration."""
+from typing import Optional
 import logging
-
 from app.config.settings import settings
 
-# Database URLs
-SQLALCHEMY_DATABASE_URL = "sqlite:///./cafe2211.db"
-
-# Create SQLAlchemy engine
-engine = create_engine(
-    SQLALCHEMY_DATABASE_URL, connect_args={"check_same_thread": False}
-)
-
-# Create SessionLocal class
-SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
-
-# Create Base class for SQLAlchemy models
-Base = declarative_base()
-
-# Supabase client (lazy initialization)
+# Supabase client (singleton)
 _supabase_client: Optional['Client'] = None
 
 def get_supabase_client() -> Optional['Client']:
@@ -34,43 +15,38 @@ def get_supabase_client() -> Optional['Client']:
             from supabase import create_client, Client
             
             SUPABASE_URL = settings.SUPABASE_URL
-            SUPABASE_KEY = settings.SUPABASE_API_KEY
+            # Prefer service role key for server‑side operations
+            # Choose the most privileged key available for server‑side operations
+            SUPABASE_KEY = (
+                settings.SUPABASE_SERVICE_ROLE_KEY
+                or settings.SUPABASE_KEY
+                or settings.SUPABASE_API_KEY
+            )
+            # Log which key source is being used (masking the actual value for security)
+            if settings.SUPABASE_SERVICE_ROLE_KEY:
+                key_source = "service_role"
+            elif settings.SUPABASE_KEY:
+                key_source = "anon"
+            else:
+                key_source = "api_key"
+            logging.info(f"Supabase client initialized using {key_source} key")
             
             if SUPABASE_URL and SUPABASE_KEY:
+                # Explicitly pass an empty options dict to prevent proxy issues
                 _supabase_client = create_client(SUPABASE_URL, SUPABASE_KEY)
             else:
-                logging.warning("Supabase credentials not configured")
-                return None
+                raise ValueError("Supabase credentials not configured")
                 
         except ImportError:
             logging.error("Supabase client not installed")
-            return None
+            raise
         except Exception as e:
             logging.error(f"Failed to initialize Supabase client: {e}")
-            return None
+            raise
     
     return _supabase_client
 
-# Backward compatibility
-supabase = get_supabase_client()
-
-
-def get_db() -> Generator[Session, None, None]:
-    """
-    Dependency to get database session.
-    
-    This is a generator that:
-    1. Creates a new session
-    2. Yields it to the endpoint
-    3. Closes it after the request
-    
-    Usage:
-        @app.get("/items")
-        def get_items(db: Session = Depends(get_db)):
-            return db.query(Item).all()
-    """
-    db = SessionLocal()
-    try:
-        yield db
-    finally:
-        db.close()
+# Global supabase client - lazy initialization
+def get_db():
+    """Get Supabase client for database operations."""
+    return get_supabase_client()

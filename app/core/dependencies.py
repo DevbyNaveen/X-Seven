@@ -2,10 +2,8 @@
 from typing import Generator, Optional, Dict, Any
 from fastapi import Depends, HTTPException, status, Header
 from fastapi.security import OAuth2PasswordBearer
-from sqlalchemy.orm import Session
 from jose import JWTError 
-from app.config.database import get_db
-from app.core.security import decode_access_token
+from app.config.database import get_supabase_client
 from app.core.supabase_auth import verify_supabase_token
 from app.models.user import User
 from app.models.business import Business
@@ -16,10 +14,10 @@ from app.models.business import Business
 
 async def get_current_user(
     authorization: Optional[str] = Header(None),
-    db: Session = Depends(get_db)
+    supabase = Depends(get_supabase_client)
 ) -> User:
     """
-    Get current authenticated user from either custom JWT or Supabase token.
+    Get current authenticated user from Supabase token only.
     This is a strict dependency and will raise an error if the user is not found 
     or the token is invalid.
     """
@@ -40,35 +38,7 @@ async def get_current_user(
     
     token = authorization.split("Bearer ")[1]
     
-    # Try to decode as custom JWT first
-    payload = decode_access_token(token)
-    
-    if payload:
-        # It's a custom JWT token
-        email: str = payload.get("sub")
-        if not email:
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Invalid token payload",
-            )
-        
-        # Find user by email
-        user = db.query(User).filter(User.email == email).first()
-        if not user:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="User not found",
-            )
-        
-        if not user.is_active:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Inactive user",
-            )
-        
-        return user
-    
-    # If custom JWT failed, try Supabase token
+    # Verify Supabase token only
     try:
         supabase_payload = await verify_supabase_token(token)
         
@@ -80,40 +50,47 @@ async def get_current_user(
                     detail="Invalid Supabase token payload",
                 )
             
-            # Find user by email
-            user = db.query(User).filter(User.email == email).first()
-            if not user:
+            # Find user by email using Supabase
+            user_response = supabase.table("users").select("*").eq("email", email).execute()
+            if not user_response.data:
                 raise HTTPException(
                     status_code=status.HTTP_404_NOT_FOUND,
                     detail="User not found in system. Please register first.",
                 )
             
-            if not user.is_active:
+            user_data = user_response.data[0]
+            if not user_data.get("is_active", True):
                 raise HTTPException(
                     status_code=status.HTTP_400_BAD_REQUEST,
                     detail="Inactive user",
                 )
             
-            return user
-    except Exception:
-        # If both failed, raise authentication error
-        pass
+            return User.from_dict(user_data)
+    except HTTPException:
+        # Re-raise HTTP exceptions from verify_supabase_token
+        raise
+    except Exception as e:
+        # Any other error during token processing
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Could not validate Supabase token",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
     
     raise HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
-        detail="Could not validate credentials",
+        detail="Invalid Supabase token",
         headers={"WWW-Authenticate": "Bearer"},
     )
 
 
 async def get_current_user_optional(
     authorization: Optional[str] = Header(None),
-    db: Session = Depends(get_db)
+    supabase = Depends(get_supabase_client)
 ) -> Optional[User]:
     """
-    Gets the current user if a token is provided, but returns None
+    Gets the current user if a Supabase token is provided, but returns None
     instead of raising an error if the token is missing or invalid.
-    Supports both custom JWT and Supabase tokens.
     """
     if authorization is None or not authorization.startswith("Bearer "):
         return None
@@ -121,63 +98,60 @@ async def get_current_user_optional(
     token = authorization.split("Bearer ")[1]
     
     try:
-        # Try to decode as custom JWT first
-        payload = decode_access_token(token)
-        if payload:
-            email: str = payload.get("sub")
-            if not email:
-                return None
-
-            user = db.query(User).filter(User.email == email).first()
-            if not user or not user.is_active:
-                return None
-
-            return user
-        
-        # If custom JWT failed, try Supabase token
+        # Verify Supabase token only
         supabase_payload = await verify_supabase_token(token)
         if supabase_payload:
             email: str = supabase_payload.get("email")
             if not email:
                 return None
 
-            user = db.query(User).filter(User.email == email).first()
-            if not user or not user.is_active:
+            user_response = supabase.table("users").select("*").eq("email", email).execute()
+            if not user_response.data:
+                return None
+            
+            user_data = user_response.data[0]
+            if not user_data.get("is_active", True):
                 return None
 
-            return user
-    except (JWTError, Exception):
+            return User.from_dict(user_data)
+    except Exception:
         # If any error occurs during token processing, treat as a guest user.
         return None
 
 
 async def get_current_business(
     current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db)
+    supabase = Depends(get_supabase_client)
 ) -> Business:
     """
     Get the business associated with current user.
     """
-    business = db.query(Business).filter(Business.id == current_user.business_id).first()
+    if not current_user.business_id:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="User is not associated with any business"
+        )
     
-    if not business:
+    business_response = supabase.table("businesses").select("*").eq("id", current_user.business_id).execute()
+    if not business_response.data:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Business not found"
         )
     
-    if not business.is_active:
+    business_data = business_response.data[0]
+    if not business_data.get("is_active", True):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Business is inactive"
         )
     
-    return business
+    return Business.from_dict(business_data)
 
 
 async def get_current_business_optional(
     current_user: Optional[User] = Depends(get_current_user_optional),
-    db: Session = Depends(get_db)
+    supabase = Depends(get_supabase_client)
 ) -> Optional[Business]:
     """
     Get the business associated with current user (optional).
@@ -186,11 +160,18 @@ async def get_current_business_optional(
     if not current_user:
         return None
     
-    business = db.query(Business).filter(Business.id == current_user.business_id).first()
-    return business if business and business.is_active else None
+    if not current_user or not current_user.business_id:
+        return None
+    
+    business_response = supabase.table("businesses").select("*").eq("id", current_user.business_id).execute()
+    if not business_response.data:
+        return None
+    
+    business_data = business_response.data[0]
+    return Business.from_dict(business_data) if business_data.get("is_active", True) else None
 
 
-def get_multi_tenant_filter(business_id: int):
+def get_multi_tenant_filter(business_id: str):
     """
     Create a filter for multi-tenant data access.
     """

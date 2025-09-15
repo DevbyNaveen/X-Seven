@@ -2,39 +2,37 @@
 Database models package.
 
 This file makes it easy to import all models at once.
-It also ensures all models are registered with SQLAlchemy.
+It also ensures all models are registered with Supabase.
 """
-from app.models.base import BaseModel, Base
-from app.models.business import Business, SubscriptionPlan, PhoneNumberType, BusinessCategory
-from app.models.user import User, UserRole
-from app.models.menu import MenuCategory, MenuItem
-from app.models.table import Table, TableStatus
-from app.models.order import Order, OrderStatus, PaymentStatus, PaymentMethod
-from app.models.message import Message 
-from app.models.phone_number import PhoneNumber, NumberStatus, NumberProvider
-from app.models.waitlist import WaitlistEntry
-from app.models.service_provider import ServiceProvider, ProviderType
-from app.models.appointment import Appointment, AppointmentStatus, AppointmentType
+
+# Import all models
+from .base import SupabaseModel
+from .business import Business, SubscriptionPlan, PhoneNumberType, BusinessCategory
+from .user import User, UserRole
+from .table import Table, TableStatus
+from .order import Order, OrderStatus, PaymentStatus, PaymentMethod
+from .phone_number import PhoneNumber, NumberStatus
+from .menu_item import MenuItem, MenuItemStatus
+from .menu_category import MenuCategory
+from .message import Message, MessageType, MessageStatus
+from .appointment import Appointment, AppointmentStatus
+from .service_provider import ServiceProvider, ServiceProviderStatus
+from .waitlist_entry import WaitlistEntry, WaitlistStatus
 
 # Export all models
 __all__ = [
     # Base
-    "BaseModel",
-    "Base",
+    "SupabaseModel",
     
     # Business
     "Business",
     "SubscriptionPlan",
-    "PhoneNumberType",
+    "PhoneNumberType", 
     "BusinessCategory",
     
     # User
-    "User", 
+    "User",
     "UserRole",
-    
-    # Menu
-    "MenuCategory",
-    "MenuItem",
     
     # Table
     "Table",
@@ -45,24 +43,30 @@ __all__ = [
     "OrderStatus",
     "PaymentStatus",
     "PaymentMethod",
-
-    # Message
-    "Message",
     
-    # Phone Number
+    # Phone
     "PhoneNumber",
     "NumberStatus",
-    "NumberProvider",
+    
+    # Menu
+    "MenuItem",
+    "MenuItemStatus",
+    "MenuCategory",
+    
+    # Message
+    "Message",
+    "MessageType",
+    "MessageStatus",
+    
+    # Appointment
+    "Appointment",
+    "AppointmentStatus",
+    
+    # Service Provider
+    "ServiceProvider",
+    "ServiceProviderStatus",
     
     # Waitlist
     "WaitlistEntry",
-    
-    # Service Providers
-    "ServiceProvider",
-    "ProviderType",
-    
-    # Appointments
-    "Appointment",
-    "AppointmentStatus",
-    "AppointmentType",
+    "WaitlistStatus",
 ]

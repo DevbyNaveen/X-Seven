@@ -1,42 +1,47 @@
-"""Base model with common fields."""
-from sqlalchemy import Column, DateTime, Integer
-from sqlalchemy.sql import func
-from app.config.database import Base
+"""Base model for Supabase operations."""
+from typing import Dict, Any, Optional, List
+from datetime import datetime
+import uuid
 
 
-class TimestampMixin:
+class SupabaseModel:
     """
-    Mixin that adds created_at and updated_at timestamps.
+    Base model for Supabase operations.
     
-    These fields are automatically managed:
-    - created_at: Set when record is created
-    - updated_at: Updated whenever record changes
+    Provides common functionality for interacting with Supabase tables.
     """
-    created_at = Column(
-        DateTime(timezone=True), 
-        server_default=func.now(),  # Database sets this
-        nullable=False
-    )
-    updated_at = Column(
-        DateTime(timezone=True),
-        onupdate=func.now(),  # Database updates this
-        nullable=True
-    )
-
-
-class BaseModel(Base, TimestampMixin):
-    """
-    Abstract base model that all models inherit from.
     
-    Provides:
-    1. Auto-incrementing ID
-    2. Timestamp fields
-    3. Common methods (we'll add more later)
-    """
-    __abstract__ = True  # SQLAlchemy won't create a table for this
+    table_name: str = ""
     
-    id = Column(Integer, primary_key=True, index=True)
+    def __init__(self, **kwargs):
+        """Initialize model with data."""
+        for key, value in kwargs.items():
+            setattr(self, key, value)
     
-    def dict(self):
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> 'SupabaseModel':
+        """Create model instance from dictionary."""
+        return cls(**data)
+    
+    def to_dict(self) -> Dict[str, Any]:
         """Convert model to dictionary."""
-        return {c.name: getattr(self, c.name) for c in self.__table__.columns}
+        return {key: value for key, value in self.__dict__.items() if not key.startswith('_')}
+    
+    def to_supabase_dict(self) -> Dict[str, Any]:
+        """Convert model to Supabase-compatible dictionary."""
+        data = self.to_dict()
+        # Convert datetime objects to ISO strings
+        for key, value in data.items():
+            if isinstance(value, datetime):
+                data[key] = value.isoformat()
+        return data
+    
+    @staticmethod
+    def generate_uuid() -> str:
+        """Generate a UUID string."""
+        return str(uuid.uuid4())
+    
+    @staticmethod
+    def generate_deterministic_uuid(namespace: str, name: str) -> str:
+        """Generate a deterministic UUID from namespace and name."""
+        return str(uuid.uuid5(uuid.NAMESPACE_DNS, f"{namespace}:{name}"))

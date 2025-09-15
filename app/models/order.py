@@ -1,116 +1,57 @@
-"""Order model for order management."""
-from sqlalchemy import Column, String, Float, ForeignKey, Integer, JSON, Enum as SQLEnum, Text, DateTime
-from sqlalchemy.orm import relationship
-import enum
-from app.models.base import BaseModel
+"""Order model for restaurant orders using Supabase."""
+from enum import Enum
+from datetime import datetime
+from typing import Optional, List, Dict, Any
+from app.models.base import SupabaseModel
 
 
-class OrderStatus(str, enum.Enum):
-    """Order lifecycle status."""
-    PENDING = "pending"  # Just created
-    CONFIRMED = "confirmed"  # Payment received or confirmed
-    PREPARING = "preparing"  # Kitchen is making it
-    READY = "ready"  # Ready for pickup/serving
-    COMPLETED = "completed"  # Delivered to customer
-    CANCELLED = "cancelled"  # Cancelled by customer or business
-
-
-class PaymentStatus(str, enum.Enum):
-    """Payment status."""
+class OrderStatus(str, Enum):
+    """Order status enumeration."""
     PENDING = "pending"
-    PAID = "paid"
+    CONFIRMED = "confirmed"
+    PREPARING = "preparing"
+    READY = "ready"
+    DELIVERED = "delivered"
+    CANCELLED = "cancelled"
+
+
+class PaymentStatus(str, Enum):
+    """Payment status enumeration."""
+    PENDING = "pending"
+    PROCESSING = "processing"
+    COMPLETED = "completed"
     FAILED = "failed"
     REFUNDED = "refunded"
 
 
-class PaymentMethod(str, enum.Enum):
-    """How customer will pay."""
-    ONLINE = "online"  # Stripe/card payment
-    CASH = "cash"  # Pay at counter
-    WALLET = "wallet"  # Digital wallet
+class PaymentMethod(str, Enum):
+    """Payment method enumeration."""
+    CASH = "cash"
+    CARD = "card"
+    MOBILE_PAY = "mobile_pay"
+    ONLINE = "online"
 
 
-class Order(BaseModel):
-    """
-    Customer orders.
+class Order(SupabaseModel):
+    """Restaurant order model for Supabase."""
+    table_name = "orders"
     
-    Contains all information about what was ordered,
-    by whom, and its current status.
-    """
-    __tablename__ = "orders"
-    
-    # Multi-tenant
-    business_id = Column(
-        Integer,
-        ForeignKey("businesses.id", ondelete="CASCADE"),
-        nullable=False,
-        index=True
-    )
-    
-    # Customer info
-    customer_id = Column(
-        Integer,
-        ForeignKey("users.id", ondelete="SET NULL")
-    )
-    customer_name = Column(String(255))  # For guest orders
-    customer_phone = Column(String(20))
-    customer_email = Column(String(255))
-    
-    # Table/Location
-    table_id = Column(
-        Integer,
-        ForeignKey("tables.id", ondelete="SET NULL")
-    )
-    order_type = Column(String(20), default="dine-in")  # dine-in, takeout, delivery
-    
-    # Scheduled orders and delivery
-    scheduled_time = Column(DateTime(timezone=True))  # For future orders
-    delivery_address = Column(Text)  # For delivery orders
-    delivery_instructions = Column(Text)  # Special delivery instructions
-    
-    # Order details
-    items = Column(JSON, nullable=False)
-    # Example: [
-    #   {
-    #     "item_id": 1,
-    #     "name": "Cappuccino",
-    #     "quantity": 2,
-    #     "unit_price": 4.50,
-    #     "customizations": {"size": "Large", "milk": "Oat"},
-    #     "subtotal": 9.00
-    #   }
-    # ]
-    
-    subtotal = Column(Float, nullable=False)
-    tax_amount = Column(Float, default=0)
-    tip_amount = Column(Float, default=0)
-    total_amount = Column(Float, nullable=False)
-    
-    # Status
-    status = Column(
-        SQLEnum(OrderStatus),
-        default=OrderStatus.PENDING,
-        nullable=False,
-        index=True
-    )
-    payment_status = Column(
-        SQLEnum(PaymentStatus),
-        default=PaymentStatus.PENDING,
-        nullable=False
-    )
-    payment_method = Column(SQLEnum(PaymentMethod))
-    
-    # Additional info
-    special_instructions = Column(Text)
-    estimated_ready_time = Column(DateTime(timezone=True))
-    
-    # Chat context
-    session_id = Column(String(50), index=True)  # Links to chat conversation
-    
-    # Relationships
-    business = relationship("Business", back_populates="orders")
-    customer = relationship("User", back_populates="orders")
-    table = relationship("Table", back_populates="orders")
-    
-    def __repr__(self):
-        return f"<Order #{self.id} - {self.status} - ${self.total_amount}>"
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        self.id = kwargs.get('id')
+        self.business_id = kwargs.get('business_id')
+        self.table_id = kwargs.get('table_id')
+        self.customer_session_id = kwargs.get('customer_session_id')
+        self.order_number = kwargs.get('order_number')
+        self.status = kwargs.get('status', OrderStatus.PENDING)
+        self.total_amount = kwargs.get('total_amount', 0.0)
+        self.tax_amount = kwargs.get('tax_amount', 0.0)
+        self.discount_amount = kwargs.get('discount_amount', 0.0)
+        self.final_amount = kwargs.get('final_amount', 0.0)
+        self.special_instructions = kwargs.get('special_instructions')
+        self.payment_status = kwargs.get('payment_status', PaymentStatus.PENDING)
+        self.payment_method = kwargs.get('payment_method')
+        self.payment_reference = kwargs.get('payment_reference')
+        self.created_at = kwargs.get('created_at')
+        self.updated_at = kwargs.get('updated_at')
+        self.completed_at = kwargs.get('completed_at')

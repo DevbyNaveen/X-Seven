@@ -39,6 +39,7 @@ wheels/
 .env.render
 
 # IDE
+
 .vscode/
 .idea/
 *.swp

@@ -6,14 +6,10 @@ email-validator
 python-multipart
 
 # Database
-sqlalchemy
-alembic
-psycopg2-binary
+supabase==2.3.1
 
 # Authentication & Security
 python-jose[cryptography]
-passlib==1.7.4
-bcrypt==3.2.0
 python-dotenv
 PyJWT==2.8.0
 
@@ -22,7 +18,7 @@ celery
 redis
 
 # HTTP Client - Fixed for supabase compatibility
-httpx>=0.24.0,<0.26.0
+httpx==0.24.1
 
 # AI & LLM
 openai==1.12.0
@@ -97,10 +93,6 @@ aiocache==0.12.2
 cachetools==5.3.2
 orjson==3.9.10
 
-# Database Connection Pooling
-asyncpg==0.29.0
-psycopg2-pool==1.1
-
 # Security Headers
 secure==0.3.0
 
@@ -117,5 +109,5 @@ google-cloud-storage==2.10.0
 # APM (Application Performance Monitoring)
 ddtrace==2.3.0
 
-# Database
+# Database & Authentication
 supabase==2.3.1
