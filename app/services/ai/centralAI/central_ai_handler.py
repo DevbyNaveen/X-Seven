@@ -463,23 +463,20 @@ Current time: {context.current_time.strftime('%Y-%m-%d %H:%M')}
         """Build dashboard context with business data for enhanced AI understanding"""
         try:
             # Load live orders
-            live_orders = self.db.query(Order).filter(
-                Order.business_id == business_id,
-                Order.status.in_([OrderStatus.PENDING, OrderStatus.PREPARING, OrderStatus.READY])
-            ).order_by(Order.created_at.desc()).limit(10).all()
+            live_orders_response = self.db.table("orders").select("*").eq("business_id", business_id).in_("status", ["PENDING", "PREPARING", "READY"]).order("created_at", desc=True).limit(10).execute()
+            live_orders = live_orders_response.data if live_orders_response.data else []
             
             # Load menu items for inventory context
-            menu_items = self.db.query(MenuItem).filter(
-                MenuItem.business_id == business_id
-            ).all()
+            menu_items_response = self.db.table("menu_items").select("*").eq("business_id", business_id).execute()
+            menu_items = menu_items_response.data if menu_items_response.data else []
             
             # Build inventory context
             inventory_items = [{
-                "id": item.id,
-                "name": item.name,
-                "stock_quantity": int(item.stock_quantity or 0),
-                "min_stock_threshold": int(item.min_stock_threshold or 0),
-                "needs_reorder": (item.stock_quantity or 0) <= (item.min_stock_threshold or 0)
+                "id": item['id'],
+                "name": item['name'],
+                "stock_quantity": int(item.get('stock_quantity', 0) or 0),
+                "min_stock_threshold": int(item.get('min_stock_threshold', 0) or 0),
+                "needs_reorder": int(item.get('stock_quantity', 0) or 0) <= int(item.get('min_stock_threshold', 0) or 0)
             } for item in menu_items]
             
             # Identify low stock items
@@ -487,11 +484,13 @@ Current time: {context.current_time.strftime('%Y-%m-%d %H:%M')}
             
             # Build order context
             order_context = [{
-                "id": order.id,
-                "status": getattr(order.status, "value", str(order.status) if order.status else None),
-                "total_amount": float(order.total_amount or 0),
-                "created_at": order.created_at.isoformat() if order.created_at else None,
-                "customer_name": order.customer_name
+                "id": order['id'],
+                "status": order.get('status'),
+                "total_amount": float(order.get('total_amount', 0) or 0),
+                "customer_name": order.get('customer_name'),
+                "items_count": len(order.get('items', [])) if 'items' in order else 0,
+                "created_at": order.get('created_at'),
+                "estimated_ready_time": order.get('estimated_ready_time')
             } for order in live_orders]
             
             return {

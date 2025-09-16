@@ -99,18 +99,43 @@ async def handle_dashboard_action(message: Dict[str, Any], business_id: int, db:
             }, f"dashboard_{business_id}")
 
 async def process_ai_chat_message(message: Dict[str, Any], business_id: int) -> Dict[str, Any]:
-    """Process AI chat messages and generate responses."""
+    """Process AI chat messages and generate responses using Dashboard AI Handler."""
+    from sqlalchemy.orm import Session
+    from app.config.database import SessionLocal
+    from app.services.ai.dashboardAI.dashboard_ai_handler import DashboardAIHandler
+    
     user_message = message.get("message", "")
+    session_id = message.get("session_id", "dashboard_default")
     
-    # This would integrate with an AI service in a real implementation
-    # For now, we'll simulate a response
-    ai_response = f"I received your message about business {business_id}: {user_message}"
-    
-    return {
-        "type": "ai_chat_response",
-        "message": ai_response,
-        "timestamp": message.get("timestamp")
-    }
+    # Create a new database session for this request
+    db = SessionLocal()
+    try:
+        # Initialize dashboard AI handler
+        dashboard_handler = DashboardAIHandler(db)
+        
+        # Process the message through the AI handler
+        result = await dashboard_handler.handle_dashboard_request(
+            message=user_message,
+            session_id=session_id,
+            business_id=business_id
+        )
+        
+        return {
+            "type": "ai_chat_response",
+            "message": result.get("message", "I'm having trouble processing your request."),
+            "success": result.get("success", True),
+            "timestamp": message.get("timestamp")
+        }
+    except Exception as e:
+        logger.error(f"Error processing AI chat message: {str(e)}")
+        return {
+            "type": "ai_chat_response",
+            "message": "I'm having trouble processing your request. Please try again.",
+            "success": False,
+            "timestamp": message.get("timestamp")
+        }
+    finally:
+        db.close()
 
 # Additional helper functions for dashboard updates
 async def send_order_notification(order_id: int, business_id: int, message: str):

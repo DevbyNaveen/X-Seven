@@ -21,6 +21,9 @@ from app.models import Business, MenuItem, MenuCategory, Order, OrderStatus
 from typing import TYPE_CHECKING
 import logging
 
+# Initialize logger
+logger = logging.getLogger(__name__)
+
 # Import action managers
 from app.services.ai.dashboardAI.Food.category_manager import CategoryManager
 from app.services.ai.dashboardAI.Food.menu_manager import MenuManager
