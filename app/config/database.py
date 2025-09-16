@@ -50,3 +50,7 @@ def get_supabase_client() -> Optional['Client']:
 def get_db():
     """Get Supabase client for database operations."""
     return get_supabase_client()
+
+# Backward compatibility for legacy code
+# TODO: Migrate all usage to get_supabase_client()
+SessionLocal = get_supabase_client

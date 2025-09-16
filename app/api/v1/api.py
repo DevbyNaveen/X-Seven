@@ -4,7 +4,6 @@ from app.api.v1.endpoints import (
     auth,
     business,
     central_chat_endpoints as central_chat,
-    global_chat_endpoints as global_chat,
     supabase_auth
 )
 from app.api.v1.endpoints.dashboard import business_dashboard as dashboard
@@ -34,13 +33,7 @@ api_router.include_router(
 api_router.include_router(
     central_chat.router,
     prefix="/chat",
-    tags=["Central Chat"]
-)
-
-api_router.include_router(
-    global_chat.router,
-    prefix="/global",
-    tags=["Global Chat"]
+    tags=["Chat"]
 )
 
 api_router.include_router(

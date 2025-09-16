@@ -160,6 +160,50 @@ async def dashboard_chat(
     }
 
 
+@router.post("/recommendations")
+async def get_recommendations(request: Dict[str, Any], db: Session = Depends(get_db)):
+    """Get personalized business recommendations."""
+    session_id = request.get("session_id") or str(uuid.uuid4())
+    user_preferences = request.get("preferences", {})
+    
+    central_ai = CentralAIHandler(db)
+    response = await central_ai.chat(
+        message="Get business recommendations",
+        session_id=session_id,
+        chat_type=ChatType.GLOBAL,
+        context={"action": "recommendations", "preferences": user_preferences}
+    )
+    
+    return {
+        "recommendations": response.get("message", ""),
+        "session_id": session_id,
+        "success": response.get("success", True),
+    }
+
+
+@router.post("/search")
+async def search_businesses(request: Dict[str, Any], db: Session = Depends(get_db)):
+    """Search for businesses based on query."""
+    query = request.get("query", "")
+    filters = request.get("filters", {})
+    
+    if not query.strip():
+        return {"error": "Search query cannot be empty"}
+    
+    central_ai = CentralAIHandler(db)
+    response = await central_ai.chat(
+        message=query,
+        session_id=str(uuid.uuid4()),
+        chat_type=ChatType.GLOBAL,
+        context={"action": "search", "filters": filters}
+    )
+    
+    return {
+        "results": response.get("message", ""),
+        "success": True,
+    }
+
+
 # Legacy endpoint for backward compatibility
 @router.post("/message")
 async def legacy_chat_message(request: Dict[str, Any], db: Session = Depends(get_db)):

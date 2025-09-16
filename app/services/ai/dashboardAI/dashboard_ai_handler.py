@@ -50,19 +50,14 @@ class DashboardFeature(str, Enum):
 
 class DashboardAIHandler:
     """
-    Dashboard AI Handler - Routes from Central AI Handler
+    Dashboard AI Handler - Specialized handler for dashboard operations
     
-    This handler works with the central AI to provide natural language management
-    of business dashboard features without hardcoding specific actions.
+    This handler provides natural language management of business dashboard features.
+    It is designed to be called by the CentralAIHandler, not to create its own instance.
     """
     
-    def __init__(self, db: Session, central_ai = None):
+    def __init__(self, db: Session):
         self.db = db
-        if central_ai is None:
-            from app.services.ai.centralAI.central_ai_handler import CentralAIHandler
-            self.central_ai = CentralAIHandler(db)
-        else:
-            self.central_ai = central_ai
         
         # Initialize action managers
         self.category_manager = CategoryManager(db)
@@ -92,17 +87,36 @@ class DashboardAIHandler:
         """
         try:
             # Build context with dashboard-specific data
-            unified_context = await self._build_dashboard_context(
+            dashboard_context = await self._build_dashboard_context(
                 message=message,
                 session_id=session_id,
                 business_id=business_id,
                 context=context or {}
             )
             
-            # Generate AI response using central AI
-            prompt = await self._create_dashboard_prompt(unified_context)
-            ai_response = await self.central_ai._get_ai_response(prompt)
-            cleaned_response = await self.central_ai._clean_response(ai_response)
+            # Generate AI response using dashboard-specific prompt
+            prompt = await self._create_dashboard_prompt(dashboard_context)
+            
+            # Use Groq client directly for AI response
+            from app.config.settings import settings
+            from groq import Groq
+            
+            client = Groq(api_key=settings.GROQ_API_KEY) if settings.GROQ_API_KEY else None
+            if not client:
+                return {
+                    "message": "AI service is not configured",
+                    "success": False,
+                    "error": "Groq API key not found"
+                }
+            
+            response = client.chat.completions.create(
+                model=settings.GROQ_MODEL or "llama-3.3-70b-versatile",
+                messages=[{"role": "user", "content": prompt}],
+                max_tokens=1000,
+                temperature=0.7
+            )
+            
+            cleaned_response = response.choices[0].message.content.strip()
             
             # Extract structured intent from AI response
             intent = self._extract_intent_from_response(cleaned_response)
@@ -112,9 +126,6 @@ class DashboardAIHandler:
                 action_result = await self._execute_action(business_id, intent)
                 if action_result and action_result.get("message"):
                     cleaned_response += "\n\n" + action_result["message"]
-            
-            # Save conversation
-            await self.central_ai._save_conversation(unified_context, cleaned_response)
             
             return {
                 "message": cleaned_response,
@@ -137,33 +148,61 @@ class DashboardAIHandler:
         session_id: str,
         business_id: int,
         context: Dict[str, Any]
-    ) -> UnifiedContext:
+    ) -> Dict[str, Any]:
         """Build context with dashboard-specific data"""
-        # Lazy import to avoid circular import at module load time
-        from app.services.ai.centralAI.central_ai_handler import UnifiedContext, ChatType
-        unified_context = UnifiedContext(
-            chat_type=ChatType.DASHBOARD,
-            session_id=session_id,
-            user_message=message,
-            business_id=business_id,
-            current_time=datetime.now()
-        )
-        
         # Load conversation history
-        unified_context.conversation_history = await self.central_ai._load_history(
-            session_id=session_id,
-            chat_type=ChatType.DASHBOARD,
-            business_id=business_id
-        )
+        from app.models import Message
+        conversation_history = []
+        if session_id:
+            messages = self.db.query(Message).filter(
+                Message.session_id == session_id,
+                Message.chat_type == "dashboard"
+            ).order_by(Message.created_at.desc()).limit(10).all()
+            
+            for msg in reversed(messages):
+                conversation_history.append(f"User: {msg.user_message}")
+                conversation_history.append(f"AI: {msg.ai_response}")
         
         # Load business data
-        unified_context.current_business = await self.central_ai._load_business(business_id)
-        unified_context.business_menu = await self.central_ai._load_menu(business_id)
+        from app.models import Business
+        business = self.db.query(Business).filter(Business.id == business_id).first()
+        current_business = None
+        if business:
+            current_business = {
+                "id": business.id,
+                "name": business.name,
+                "description": business.description,
+                "category": business.category,
+                "is_active": business.is_active
+            }
+        
+        # Load business menu
+        from app.models import MenuItem
+        menu_items = self.db.query(MenuItem).filter(MenuItem.business_id == business_id).all()
+        business_menu = []
+        for item in menu_items:
+            business_menu.append({
+                "id": item.id,
+                "name": item.name,
+                "price": float(item.price),
+                "description": item.description,
+                "is_available": item.is_available
+            })
         
         # Load dashboard-specific data
-        unified_context.dashboard_data = await self._load_dashboard_data(business_id)
+        dashboard_data = await self._load_dashboard_data(business_id)
         
-        return unified_context
+        return {
+            "chat_type": "dashboard",
+            "session_id": session_id,
+            "user_message": message,
+            "business_id": business_id,
+            "current_time": datetime.now(),
+            "conversation_history": conversation_history,
+            "current_business": current_business,
+            "business_menu": business_menu,
+            "dashboard_data": dashboard_data
+        }
     
     async def _load_dashboard_data(self, business_id: int) -> Dict[str, Any]:
         """Load dashboard-specific data for context"""
@@ -226,7 +265,7 @@ class DashboardAIHandler:
                 "reminders": []
             }
     
-    async def _create_dashboard_prompt(self, context: UnifiedContext) -> str:
+    async def _create_dashboard_prompt(self, context: Dict[str, Any]) -> str:
         """Create dashboard-specific prompt for AI"""
         base = f"""You are X-SevenAI Dashboard Manager, an intelligent business management assistant.
 Current time: {context.current_time.strftime('%Y-%m-%d %H:%M')}

@@ -18,7 +18,7 @@ from groq import Groq
 
 from app.models import Business, MenuItem, Message, Order, OrderStatus
 from app.config.settings import settings
-from app.services.ai.dashboardAI.dashboard_ai_handler import DashboardAIHandler
+# Import DashboardAIHandler only when needed to avoid circular imports
 
 
 class ChatType(str, Enum):
@@ -143,50 +143,29 @@ class CentralAIHandler:
         Main chat method - Let AI work naturally
         """
         try:
-            # For DASHBOARD chat type, use enhanced routing logic
+            # For DASHBOARD chat type, delegate to DashboardAIHandler
             if chat_type == ChatType.DASHBOARD:
                 business_id = context.get("business_id") if context else None
                 if business_id:
-                    # Build dashboard context with business data
-                    dashboard_context = await self._build_dashboard_context(business_id)
+                    # Import DashboardAIHandler only when needed
+                    from app.services.ai.dashboardAI.dashboard_ai_handler import DashboardAIHandler
                     
-                    # Check if AI wants to call a function
-                    ai_response = await self._process_dashboard_request(
+                    # Create DashboardAIHandler instance (no circular dependency)
+                    dashboard_handler = DashboardAIHandler(self.db)
+                    
+                    # Delegate to DashboardAIHandler
+                    return await dashboard_handler.handle_dashboard_request(
                         message=message,
+                        session_id=session_id,
                         business_id=business_id,
-                        dashboard_context=dashboard_context
+                        context=context
                     )
-                    
-                    # If AI wants to call a function, route to Dashboard AI Handler
-                    if ai_response.get("function_call"):
-                        function_name = ai_response["function_call"]["name"]
-                        function_args = ai_response["function_call"]["arguments"]
-                        
-                        # Route to Dashboard AI Handler
-                        dashboard_handler = DashboardAIHandler(self.db, self)
-                        function_result = await self._execute_dashboard_function(
-                            function_name, function_args, business_id, dashboard_handler
-                        )
-                        
-                        # Send result back to AI for natural language response
-                        final_response = await self._generate_response_with_function_result(
-                            message, function_name, function_result, dashboard_context
-                        )
-                        
-                        return {
-                            "message": final_response,
-                            "success": True,
-                            "chat_type": chat_type.value
-                        }
-                
-                # Fallback to existing dashboard handler
-                dashboard_handler = DashboardAIHandler(self.db, self)
-                return await dashboard_handler.handle_dashboard_request(
-                    message=message,
-                    session_id=session_id,
-                    business_id=context.get("business_id") if context else None,
-                    context=context
-                )
+                else:
+                    return {
+                        "message": "Business ID is required for dashboard operations",
+                        "success": False,
+                        "error": "Missing business_id"
+                    }
             
             # For other chat types, use the existing implementation
             # Build context with real data
@@ -571,83 +550,9 @@ Otherwise, respond naturally to the user."""
         
         try:
             ai_response = await self._get_ai_response(prompt)
-            
-            # Try to parse function call from response
-            import re
-            function_call_match = re.search(r'\{"function_call":\s*\{[^}]+\}\}', ai_response)
-            if function_call_match:
-                try:
-                    function_call = json.loads(function_call_match.group())
-                    return function_call
-                except json.JSONDecodeError:
-                    pass
-            
-            # Return as natural response
-            return {"message": ai_response}
+            return ai_response
         except Exception as e:
-            self.logger.exception("Error processing dashboard request: %s", e)
-            return {"message": "I'm having trouble processing your request. Please try again."}
-
-    async def _execute_dashboard_function(
-        self,
-        function_name: str,
-        function_args: Dict[str, Any],
-        business_id: int,
-        dashboard_handler: DashboardAIHandler
-    ) -> Dict[str, Any]:
-        """Execute dashboard function by routing to Dashboard AI Handler"""
-        try:
-            # Create intent object for Dashboard AI Handler
-            intent = {
-                "domain": self._map_function_to_domain(function_name),
-                "action": function_name,
-                "data": function_args
-            }
-            
-            # Execute the action
-            result = await dashboard_handler._execute_action(business_id, intent)
-            return result or {"success": True, "message": f"{function_name} executed successfully"}
-        except Exception as e:
-            self.logger.exception("Error executing dashboard function %s: %s", function_name, e)
-            return {"success": False, "message": f"Error executing {function_name}: {str(e)}"}
-
-    def _map_function_to_domain(self, function_name: str) -> str:
-        """Map function name to domain for Dashboard AI Handler"""
-        function_domain_map = {
-            "update_menu_item": "menu",
-            "add_menu_category": "category",
-            "check_inventory": "inventory",
-            "get_live_orders": "order",
-            "update_order_status": "order",
-            "get_table_occupancy": "order",
-            "generate_sales_report": "analytics"
-        }
-        return function_domain_map.get(function_name, "menu")
-
-    async def _generate_response_with_function_result(
-        self,
-        original_message: str,
-        function_name: str,
-        function_result: Dict[str, Any],
-        dashboard_context: Dict[str, Any]
-    ) -> str:
-        """Generate natural language response based on function result"""
-        prompt = f"""You are X-SevenAI Dashboard Manager, an intelligent business management assistant.
-
-User Request: {original_message}
-
-Operation Performed: {function_name}
-Result: {json.dumps(function_result, indent=2)}
-
-Please provide a natural language response to the user summarizing what was done and any relevant information.
-Be concise and professional."""
-        
-        try:
-            response = await self._get_ai_response(prompt)
-            return response
-        except Exception as e:
-            self.logger.exception("Error generating response with function result: %s", e)
-            return f"Operation {function_name} completed. Result: {function_result.get('message', 'Success')}"
+            return f"Error generating response: {str(e)}"
 
     async def _clean_response(self, text: str) -> str:
         """Clean response formatting"""
