@@ -2,10 +2,8 @@
 from typing import Any, Dict, List
 from datetime import datetime, timedelta
 from fastapi import APIRouter, Depends, HTTPException, status, WebSocket
-from sqlalchemy.orm import Session
-from sqlalchemy import func
 
-from app.config.database import get_db
+from app.config.database import get_supabase_client
 from app.core.dependencies import get_current_business, get_current_user
 from app.models import Business, Order, Message, User, OrderStatus
 from app.services.websocket.connection_manager import manager
@@ -19,7 +17,7 @@ async def get_business_details(
     business_id: int,
     current_business: Business = Depends(get_current_business),
     current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db)
+    supabase = Depends(get_supabase_client)
 ) -> Any:
     """Get current business details."""
     # Verify business access
@@ -51,11 +49,11 @@ async def get_business_details(
 
 
 @router.get("/{business_id}/dashboard", response_model=dict)
-async def get_business_dashboard(
+async def get_dashboard_overview(
     business_id: int,
     current_business: Business = Depends(get_current_business),
     current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db)
+    supabase = Depends(get_supabase_client)
 ) -> Any:
     """Get dashboard overview data."""
     # Verify business access
@@ -129,7 +127,7 @@ async def get_business_stats(
     period: str = "7d",  # 1d, 7d, 30d
     current_business: Business = Depends(get_current_business),
     current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db)
+    supabase = Depends(get_supabase_client)
 ) -> Any:
     """Get real-time business statistics."""
     # Verify business access
@@ -202,7 +200,7 @@ async def update_business_config(
     config_data: Dict[str, Any],
     current_business: Business = Depends(get_current_business),
     current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db)
+    supabase = Depends(get_supabase_client)
 ) -> Any:
     """Update business configuration."""
     # Verify business access
@@ -250,7 +248,7 @@ async def update_business_config(
 
 @router.get("/overview")
 async def get_dashboard_overview(
-    db: Session = Depends(get_db),
+    supabase = Depends(get_supabase_client),
     business: Business = Depends(get_current_business),
     current_user: User = Depends(get_current_user)
 ) -> Any:
@@ -291,7 +289,7 @@ async def get_dashboard_overview(
 @router.get("/conversations")
 async def get_active_conversations(
     limit: int = 20,
-    db: Session = Depends(get_db),
+    supabase = Depends(get_supabase_client),
     business: Business = Depends(get_current_business),
     current_user: User = Depends(get_current_user)
 ) -> List[Dict[str, Any]]:
@@ -335,7 +333,7 @@ async def get_active_conversations(
 @router.post("/takeover/{session_id}")
 async def takeover_conversation(
     session_id: str,
-    db: Session = Depends(get_db),
+    supabase = Depends(get_supabase_client),
     business: Business = Depends(get_current_business),
     current_user: User = Depends(get_current_user)
 ) -> Any:
@@ -375,7 +373,7 @@ async def takeover_conversation(
 async def dashboard_websocket(
     websocket: WebSocket,
     session_id: str,
-    db: Session = Depends(get_db)
+    supabase = Depends(get_supabase_client)
 ):
     """WebSocket for live dashboard updates."""
     await manager.connect(websocket, f"dashboard_{session_id}")
@@ -390,7 +388,7 @@ async def dashboard_websocket(
 
 @router.get("/orders/live")
 async def get_live_orders(
-    db: Session = Depends(get_db),
+    supabase = Depends(get_supabase_client),
     business: Business = Depends(get_current_business),
     current_user: User = Depends(get_current_user)
 ) -> List[Dict[str, Any]]:

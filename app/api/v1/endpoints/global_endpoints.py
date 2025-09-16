@@ -4,13 +4,12 @@ Global Chat Endpoints - Business discovery service
 from __future__ import annotations
 
 import uuid
-from typing import Dict, Any, Optional
+from typing import Dict, Any
 
-from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy.orm import Session
+from fastapi import APIRouter, Depends, HTTPException
 
-from app.config.database import get_db
-from app.services.ai.global_ai_handler import GlobalAIHandler
+from app.config.database import get_supabase_client
+from app.core.ai.types import ChatContext as ChatType
 
 router = APIRouter(tags=["Global AI"])
 
@@ -18,21 +17,22 @@ router = APIRouter(tags=["Global AI"])
 @router.post("/")
 async def global_chat(
     request: Dict[str, Any],
-    db: Session = Depends(get_db)
+    supabase = Depends(get_supabase_client)  # ✅ Fixed dependency
 ) -> Dict[str, Any]:
-    """Process a global business discovery chat message"""
+    """Process a global business discovery chat message."""
     session_id = request.get("session_id") or str(uuid.uuid4())
     message = request.get("message", "").strip()
+    context = request.get("context", {})
     
     if not message:
         raise HTTPException(status_code=400, detail="Message cannot be empty")
     
-    handler = GlobalAIHandler(db)
-    response = await handler.process_message(
+    central_ai = CentralAIHandler(supabase)  # ✅ Pass supabase instead of db
+    response = await central_ai.chat(
         message=message,
         session_id=session_id,
-        user_id=request.get("user_id"),
-        additional_context=request.get("context", {})
+        chat_type=ChatType.GLOBAL,
+        context=context
     )
     
     return response

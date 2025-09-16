@@ -5,8 +5,8 @@ from typing import List, Optional, Dict, Any
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import func, and_, or_
 from sqlalchemy.orm import Session
+from app.config.database import get_supabase_client
 
-from app.config.database import get_db
 from app.core.dependencies import get_current_business
 from app.models import (
     Business, Order, User, MenuItem, Table, 
@@ -25,7 +25,7 @@ async def get_sales_analytics(
     start_date: Optional[str] = Query(None, description="Start date in YYYY-MM-DD format"),
     end_date: Optional[str] = Query(None, description="End date in YYYY-MM-DD format"),
     business_id: int = Depends(get_current_business),
-    db: Session = Depends(get_db)
+    supabase = Depends(get_supabase_client)
 ):
     """
     Revenue analysis with date ranges.
@@ -102,7 +102,7 @@ async def get_revenue_trends(
     period: str = Query("monthly", description="Period type: daily, weekly, monthly"),
     months: int = Query(6, description="Number of months to analyze"),
     business_id: int = Depends(get_current_business),
-    db: Session = Depends(get_db)
+    supabase = Depends(get_supabase_client)
 ):
     """
     Daily/weekly/monthly revenue patterns.
@@ -183,7 +183,7 @@ async def get_transaction_volume(
     start_date: Optional[str] = Query(None, description="Start date in YYYY-MM-DD format"),
     end_date: Optional[str] = Query(None, description="End date in YYYY-MM-DD format"),
     business_id: int = Depends(get_current_business),
-    db: Session = Depends(get_db)
+    supabase = Depends(get_supabase_client)
 ):
     """
     Order/appointment/service count analysis.
@@ -277,7 +277,7 @@ async def get_average_transaction_value(
     period: str = Query("monthly", description="Period type: daily, weekly, monthly"),
     months: int = Query(6, description="Number of months to analyze"),
     business_id: int = Depends(get_current_business),
-    db: Session = Depends(get_db)
+    supabase = Depends(get_supabase_client)
 ):
     """
     Average transaction value trends.
@@ -361,7 +361,7 @@ async def get_payment_methods_distribution(
     start_date: Optional[str] = Query(None, description="Start date in YYYY-MM-DD format"),
     end_date: Optional[str] = Query(None, description="End date in YYYY-MM-DD format"),
     business_id: int = Depends(get_current_business),
-    db: Session = Depends(get_db)
+    supabase = Depends(get_supabase_client)
 ):
     """
     Payment type distribution.
@@ -433,7 +433,7 @@ async def get_customer_behavior(
     start_date: Optional[str] = Query(None, description="Start date in YYYY-MM-DD format"),
     end_date: Optional[str] = Query(None, description="End date in YYYY-MM-DD format"),
     business_id: int = Depends(get_current_business),
-    db: Session = Depends(get_db)
+    supabase = Depends(get_supabase_client)
 ):
     """
     Customer visit patterns and preferences.
@@ -538,7 +538,7 @@ async def get_customer_behavior(
 async def get_customer_retention(
     months: int = Query(6, description="Number of months to analyze for retention"),
     business_id: int = Depends(get_current_business),
-    db: Session = Depends(get_db)
+    supabase = Depends(get_supabase_client)
 ):
     """
     Repeat customer rates and loyalty.
@@ -624,7 +624,7 @@ async def get_customer_retention(
 async def get_customer_lifetime_value(
     months: int = Query(12, description="Number of months to calculate CLV"),
     business_id: int = Depends(get_current_business),
-    db: Session = Depends(get_db)
+    supabase = Depends(get_supabase_client)
 ):
     """
     CLV calculation and segmentation.
@@ -725,7 +725,7 @@ async def get_customer_lifetime_value(
 async def get_customer_acquisition(
     months: int = Query(6, description="Number of months to analyze"),
     business_id: int = Depends(get_current_business),
-    db: Session = Depends(get_db)
+    supabase = Depends(get_supabase_client)
 ):
     """
     New vs returning customer analysis.
@@ -798,7 +798,7 @@ async def get_customer_acquisition(
 async def get_customer_satisfaction(
     months: int = Query(6, description="Number of months to analyze"),
     business_id: int = Depends(get_current_business),
-    db: Session = Depends(get_db)
+    supabase = Depends(get_supabase_client)
 ):
     """
     Feedback scores and sentiment.
@@ -863,7 +863,7 @@ async def get_customer_satisfaction(
 async def get_peak_hours(
     days: int = Query(30, description="Number of days to analyze"),
     business_id: int = Depends(get_current_business),
-    db: Session = Depends(get_db)
+    supabase = Depends(get_supabase_client)
 ):
     """
     Busiest times and staffing needs.
@@ -914,7 +914,7 @@ async def get_peak_hours(
 async def get_service_performance(
     days: int = Query(30, description="Number of days to analyze"),
     business_id: int = Depends(get_current_business),
-    db: Session = Depends(get_db)
+    supabase = Depends(get_supabase_client)
 ):
     """
     Order processing times and efficiency.
@@ -992,7 +992,7 @@ async def get_service_performance(
 async def get_staff_productivity(
     days: int = Query(30, description="Number of days to analyze"),
     business_id: int = Depends(get_current_business),
-    db: Session = Depends(get_db)
+    supabase = Depends(get_supabase_client)
 ):
     """
     Staff performance and task completion.
@@ -1048,7 +1048,7 @@ async def get_staff_productivity(
 async def get_conversion_rates(
     days: int = Query(30, description="Number of days to analyze"),
     business_id: int = Depends(get_current_business),
-    db: Session = Depends(get_db)
+    supabase = Depends(get_supabase_client)
 ):
     """
     Visitor-to-customer conversion tracking.
@@ -1114,7 +1114,7 @@ async def get_conversion_rates(
 async def get_capacity_utilization(
     days: int = Query(30, description="Number of days to analyze"),
     business_id: int = Depends(get_current_business),
-    db: Session = Depends(get_db)
+    supabase = Depends(get_supabase_client)
 ):
     """
     Resource usage and optimization opportunities.

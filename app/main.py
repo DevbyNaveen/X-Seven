@@ -2,8 +2,7 @@
 from fastapi import FastAPI, Request, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
-from sqlalchemy.orm import Session
-from app.config.database import get_db, get_supabase_client
+from app.config.database import get_supabase_client
 from app.config.settings import settings
 from app.config.logging import get_logger
 from app.api.v1.api import api_router

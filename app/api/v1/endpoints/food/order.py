@@ -5,7 +5,7 @@ from fastapi import APIRouter, Depends, HTTPException, status, Query
 from sqlalchemy.orm import Session
 from sqlalchemy import func, and_
 
-from app.config.database import get_db
+from app.config.database import get_supabase_client
 from app.core.dependencies import get_current_business, get_current_user
 from app.models import Order, OrderStatus, Business, User, MenuItem
 from app.schemas.order import OrderCreate, OrderResponse, OrderStatusUpdate
@@ -18,7 +18,7 @@ router = APIRouter()
 @router.get("/active", response_model=List[OrderResponse])
 async def get_active_orders(
     business: Business = Depends(get_current_business),
-    db: Session = Depends(get_db)
+    supabase = Depends(get_supabase_client)
 ) -> Any:
     """
     Get live pending/preparing orders for food service.
@@ -49,7 +49,7 @@ async def get_order_history(
     limit: int = Query(50, description="Maximum number of orders to return"),
     offset: int = Query(0, description="Number of orders to skip"),
     business: Business = Depends(get_current_business),
-    db: Session = Depends(get_db)
+    supabase = Depends(get_supabase_client)
 ) -> Any:
     """
     Get order history with filters.
@@ -77,7 +77,7 @@ async def create_food_order(
     order_data: OrderCreate,
     business: Business = Depends(get_current_business),
     current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db)
+    supabase = Depends(get_supabase_client)
 ) -> Any:
     """
     Create new food order.
@@ -119,7 +119,7 @@ async def update_food_order_status(
     order_id: int,
     status_update: OrderStatusUpdate,
     business: Business = Depends(get_current_business),
-    db: Session = Depends(get_db)
+    supabase = Depends(get_supabase_client)
 ) -> Any:
     """
     Update food order status.
@@ -170,7 +170,7 @@ async def update_food_order_status(
 async def get_food_order_stats(
     period: str = Query("7d", description="Period for stats: 1d, 7d, 30d"),
     business: Business = Depends(get_current_business),
-    db: Session = Depends(get_db)
+    supabase = Depends(get_supabase_client)
 ) -> Any:
     """
     Get food order statistics.
@@ -220,7 +220,7 @@ async def get_kitchen_queue(
     status: OrderStatus = Query(OrderStatus.PREPARING, description="Filter by order status"),
     limit: int = Query(20, description="Maximum number of orders to return"),
     business: Business = Depends(get_current_business),
-    db: Session = Depends(get_db)
+    supabase = Depends(get_supabase_client)
 ) -> Any:
     """
     Kitchen-specific order view.

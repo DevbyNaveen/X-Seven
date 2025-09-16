@@ -6,8 +6,6 @@ from __future__ import annotations
 import logging
 from typing import Dict, Any, Optional
 
-from sqlalchemy.orm import Session
-
 from app.core.ai.base_handler import BaseAIHandler
 from app.core.ai.types import RichContext, ChatContext
 from app.core.ai.context_builders import build_global_context, load_conversation_history
@@ -16,8 +14,8 @@ from app.core.ai.context_builders import build_global_context, load_conversation
 class GlobalAIHandler(BaseAIHandler):
     """Handler for global business discovery chat"""
     
-    def __init__(self, db: Session):
-        super().__init__(db)
+    def __init__(self, supabase):
+        super().__init__(supabase)
         self.logger = logging.getLogger(__name__)
     
     async def process_message(

@@ -6,8 +6,6 @@ from __future__ import annotations
 import logging
 from typing import Dict, Any, Optional
 
-from sqlalchemy.orm import Session
-
 from app.core.ai.base_handler import BaseAIHandler
 from app.core.ai.types import RichContext, ChatContext
 from app.core.ai.context_builders import build_dashboard_context, load_conversation_history
@@ -21,16 +19,16 @@ from app.services.ai.Food.reports_manager import ReportsManager
 class DashboardAIHandler(BaseAIHandler):
     """Handler for dashboard management chat"""
     
-    def __init__(self, db: Session):
-        super().__init__(db)
+    def __init__(self, supabase):
+        super().__init__(supabase)
         self.logger = logging.getLogger(__name__)
         
         # Initialize dashboard managers
-        self.category_manager = CategoryManager(db)
-        self.menu_manager = MenuManager(db)
-        self.order_manager = OrderManager(db)
-        self.inventory_manager = InventoryManager(db)
-        self.reports_manager = ReportsManager(db)
+        self.category_manager = CategoryManager(supabase)
+        self.menu_manager = MenuManager(supabase)
+        self.order_manager = OrderManager(supabase)
+        self.inventory_manager = InventoryManager(supabase)
+        self.reports_manager = ReportsManager(supabase)
     
     async def process_message(
         self,

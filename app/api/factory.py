@@ -8,9 +8,8 @@ from typing import Dict, Any, Callable, Optional
 from functools import wraps
 
 from fastapi import Depends, HTTPException
-from sqlalchemy.orm import Session
 
-from app.config.database import get_db
+from app.config.database import get_supabase_client
 
 
 def create_ai_endpoint(handler_class, chat_context: str, auth_func: Optional[Callable] = None):
@@ -22,10 +21,10 @@ def create_ai_endpoint(handler_class, chat_context: str, auth_func: Optional[Cal
         chat_context: The chat context type
         auth_func: Optional authentication function
     """
-    async def endpoint(request: Dict[str, Any], db: Session = Depends(get_db)):
+    async def endpoint(request: Dict[str, Any], supabase = Depends(get_supabase_client)):
         # Authentication if provided
         if auth_func:
-            business = await auth_func(request, db)
+            business = await auth_func(request, supabase)
             business_id = business.id if business else None
         else:
             business_id = None
@@ -41,7 +40,7 @@ def create_ai_endpoint(handler_class, chat_context: str, auth_func: Optional[Cal
             raise HTTPException(status_code=400, detail="Message cannot be empty")
         
         # Initialize handler
-        handler = handler_class(db)
+        handler = handler_class(supabase)
         
         # Prepare handler arguments
         handler_kwargs = {

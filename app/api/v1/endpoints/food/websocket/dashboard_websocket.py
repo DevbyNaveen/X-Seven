@@ -5,7 +5,7 @@ from typing import Dict, Any
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect, HTTPException
 from sqlalchemy.orm import Session
 
-from app.config.database import get_db as get_supabase_client
+from app.config.database import get_supabase_client as get_supabase_client
 from app.core.supabase_auth import verify_supabase_token
 from app.models import Business, Order, Table
 from app.services.websocket.connection_manager import manager

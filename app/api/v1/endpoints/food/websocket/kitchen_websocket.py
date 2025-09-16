@@ -44,7 +44,7 @@ async def kitchen_websocket(
                     await manager.send_personal_message({"type": "pong"}, websocket)
                 elif message.get("type") == "kitchen_action":
                     # Process kitchen actions and broadcast to relevant clients
-                    await handle_kitchen_action(message, business_id, db)
+                    await handle_kitchen_action(message, business_id, supabase)
                 elif message.get("type") == "staff_notification":
                     # Process staff notifications
                     await handle_staff_notification(message, business_id)

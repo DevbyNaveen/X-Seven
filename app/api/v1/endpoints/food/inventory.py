@@ -6,7 +6,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy import and_, func
 from pydantic import BaseModel
 
-from app.config.database import get_db
+from app.config.database import get_supabase_client
 from app.core.dependencies import get_current_business, get_current_user
 from app.models import Business, User, MenuItem, Order
 from app.services.websocket.connection_manager import manager
@@ -69,7 +69,7 @@ async def get_food_inventory(
     low_stock_only: bool = Query(False, description="Show only low stock items"),
     category_id: Optional[int] = Query(None, description="Filter by category"),
     business: Business = Depends(get_current_business),
-    db: Session = Depends(get_db)
+    supabase = Depends(get_supabase_client)
 ) -> Any:
     """
     Get inventory with stock levels for food service.
@@ -115,7 +115,7 @@ async def update_food_inventory(
     item_id: int,
     update_data: InventoryUpdate,
     business: Business = Depends(get_current_business),
-    db: Session = Depends(get_db)
+    supabase = Depends(get_supabase_client)
 ) -> Any:
     """
     Update stock quantity for a menu item.
@@ -179,7 +179,7 @@ async def update_food_inventory(
 @router.get("/low-stock", response_model=List[LowStockItem])
 async def get_food_low_stock(
     business: Business = Depends(get_current_business),
-    db: Session = Depends(get_db)
+    supabase = Depends(get_supabase_client)
 ) -> Any:
     """
     Get items needing reorder.
@@ -211,7 +211,7 @@ async def create_reorder_request(
     reorder_request: ReorderRequest,
     business: Business = Depends(get_current_business),
     current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db)
+    supabase = Depends(get_supabase_client)
 ) -> Any:
     """
     Create reorder request.
@@ -258,7 +258,7 @@ async def create_reorder_request(
 async def track_ingredient_usage(
     period: str = Query("7d", description="Period to track usage (7d, 30d, 90d)"),
     business: Business = Depends(get_current_business),
-    db: Session = Depends(get_db)
+    supabase = Depends(get_supabase_client)
 ) -> Any:
     """
     Track ingredient usage.

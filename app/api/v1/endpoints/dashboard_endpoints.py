@@ -7,12 +7,9 @@ import uuid
 from typing import Dict, Any
 
 from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy.orm import Session
 
-from app.config.database import get_db
-from app.core.dependencies import get_current_business
-from app.models import Business
-from app.services.ai.dashboard_ai_handler import DashboardAIHandler
+from app.config.database import get_supabase_client
+from app.core.ai.types import ChatContext as ChatType
 
 router = APIRouter(tags=["Dashboard AI"])
 
@@ -20,23 +17,28 @@ router = APIRouter(tags=["Dashboard AI"])
 @router.post("/")
 async def dashboard_chat(
     request: Dict[str, Any],
-    current_business: Business = Depends(get_current_business),
-    db: Session = Depends(get_db)
+    supabase = Depends(get_supabase_client)  # ✅ Fixed dependency
 ) -> Dict[str, Any]:
-    """Process a dashboard management chat message"""
+    """Process a dashboard management chat message."""
     session_id = request.get("session_id") or str(uuid.uuid4())
     message = request.get("message", "").strip()
+    context = request.get("context", {})
     
     if not message:
         raise HTTPException(status_code=400, detail="Message cannot be empty")
     
-    handler = DashboardAIHandler(db)
-    response = await handler.process_message(
+    # Get business_id from context or request
+    business_id = context.get("business_id") or request.get("business_id")
+    if not business_id:
+        raise HTTPException(status_code=400, detail="Business ID required")
+    
+    central_ai = CentralAIHandler(supabase)  # ✅ Pass supabase instead of db
+    context["business_id"] = business_id
+    response = await central_ai.chat(
         message=message,
         session_id=session_id,
-        business_id=current_business.id,
-        user_id=request.get("user_id"),
-        additional_context=request.get("context", {})
+        chat_type=ChatType.DASHBOARD,
+        context=context
     )
     
     return response

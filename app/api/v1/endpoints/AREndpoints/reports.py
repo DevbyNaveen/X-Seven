@@ -8,10 +8,12 @@ from sqlalchemy.orm import Session
 from typing import List, Optional
 import logging
 from datetime import datetime, timedelta
+from supabase import create_client, Client
+
 import random
 
-from app.config.database import get_db
 from app.core.dependencies import get_current_business
+from app.config.database import get_supabase_client
 from app.models.order import Order
 from app.models.business import Business
 from app.models.user import User
@@ -30,7 +32,7 @@ router = APIRouter()
 async def get_daily_summary(
     date: str = Query(None, description="Date in YYYY-MM-DD format. Defaults to today."),
     business_id: int = Depends(get_current_business),
-    db: Session = Depends(get_db)
+    supabase: Client = Depends(get_supabase_client)
 ):
     """
     Comprehensive daily business overview.
@@ -92,7 +94,7 @@ async def get_daily_summary(
 async def get_daily_sales(
     date: str = Query(None, description="Date in YYYY-MM-DD format. Defaults to today."),
     business_id: int = Depends(get_current_business),
-    db: Session = Depends(get_db)
+    supabase: Client = Depends(get_supabase_client)
 ):
     """
     Daily revenue and transaction summary.
@@ -166,7 +168,7 @@ async def get_daily_sales(
 async def get_daily_operations(
     date: str = Query(None, description="Date in YYYY-MM-DD format. Defaults to today."),
     business_id: int = Depends(get_current_business),
-    db: Session = Depends(get_db)
+    supabase: Client = Depends(get_supabase_client)
 ):
     """
     Daily operational performance.
@@ -241,7 +243,7 @@ async def get_daily_operations(
 async def get_daily_staff(
     date: str = Query(None, description="Date in YYYY-MM-DD format. Defaults to today."),
     business_id: int = Depends(get_current_business),
-    db: Session = Depends(get_db)
+    supabase: Client = Depends(get_supabase_client)
 ):
     """
     Daily staff performance and hours.
@@ -327,7 +329,7 @@ async def get_daily_staff(
 async def get_daily_customer(
     date: str = Query(None, description="Date in YYYY-MM-DD format. Defaults to today."),
     business_id: int = Depends(get_current_business),
-    db: Session = Depends(get_db)
+    supabase: Client = Depends(get_supabase_client)
 ):
     """
     Daily customer interaction summary.
@@ -421,7 +423,7 @@ async def get_daily_customer(
 async def get_weekly_performance(
     weeks: int = Query(1, description="Number of weeks to analyze. Defaults to 1 (current week)."),
     business_id: int = Depends(get_current_business),
-    db: Session = Depends(get_db)
+    supabase: Client = Depends(get_supabase_client)
 ):
     """
     Weekly business performance overview.
@@ -512,7 +514,7 @@ async def get_weekly_performance(
 async def get_weekly_trends(
     weeks: int = Query(4, description="Number of weeks to analyze for trends. Defaults to 4 weeks."),
     business_id: int = Depends(get_current_business),
-    db: Session = Depends(get_db)
+    supabase: Client = Depends(get_supabase_client)
 ):
     """
     Weekly trend analysis and insights.
@@ -615,7 +617,7 @@ async def get_weekly_trends(
 @router.get("/reports/weekly-comparison")
 async def get_weekly_comparison(
     business_id: int = Depends(get_current_business),
-    db: Session = Depends(get_db)
+    supabase: Client = Depends(get_supabase_client)
 ):
     """
     Week-over-week performance.
@@ -709,7 +711,7 @@ async def get_weekly_comparison(
 @router.get("/reports/weekly-goals")
 async def get_weekly_goals(
     business_id: int = Depends(get_current_business),
-    db: Session = Depends(get_db)
+    supabase: Client = Depends(get_supabase_client)
 ):
     """
     Goal achievement and progress.
@@ -801,7 +803,7 @@ async def get_weekly_goals(
 @router.get("/reports/weekly-forecasting")
 async def get_weekly_forecasting(
     business_id: int = Depends(get_current_business),
-    db: Session = Depends(get_db)
+    supabase: Client = Depends(get_supabase_client)
 ):
     """
     Next week predictions.
@@ -889,7 +891,7 @@ async def get_weekly_forecasting(
 async def get_monthly_comprehensive(
     months: int = Query(1, description="Number of months to analyze. Defaults to 1 (current month)."),
     business_id: int = Depends(get_current_business),
-    db: Session = Depends(get_db)
+    supabase: Client = Depends(get_supabase_client)
 ):
     """
     Complete monthly analysis.
@@ -996,7 +998,7 @@ async def get_monthly_comprehensive(
 @router.get("/reports/monthly-financial")
 async def get_monthly_financial(
     business_id: int = Depends(get_current_business),
-    db: Session = Depends(get_db)
+    supabase: Client = Depends(get_supabase_client)
 ):
     """
     Monthly financial performance.
@@ -1093,7 +1095,7 @@ async def get_monthly_financial(
 @router.get("/reports/monthly-customer")
 async def get_monthly_customer(
     business_id: int = Depends(get_current_business),
-    db: Session = Depends(get_db)
+    supabase: Client = Depends(get_supabase_client)
 ):
     """
     Monthly customer analysis.
@@ -1202,7 +1204,7 @@ async def get_monthly_customer(
 @router.get("/reports/monthly-operational")
 async def get_monthly_operational(
     business_id: int = Depends(get_current_business),
-    db: Session = Depends(get_db)
+    supabase: Client = Depends(get_supabase_client)
 ):
     """
     Monthly operational efficiency.
@@ -1301,7 +1303,7 @@ async def get_monthly_operational(
 async def get_monthly_growth(
     months: int = Query(6, description="Number of months to analyze for growth. Defaults to 6 months."),
     business_id: int = Depends(get_current_business),
-    db: Session = Depends(get_db)
+    supabase: Client = Depends(get_supabase_client)
 ):
     """
     Monthly growth analysis.
@@ -1437,7 +1439,7 @@ async def generate_custom_report(
     end_date: str = Query(None, description="End date in YYYY-MM-DD format"),
     format: str = Query("json", description="Output format: json, csv, or pdf"),
     business_id: int = Depends(get_current_business),
-    db: Session = Depends(get_db)
+    supabase: Client = Depends(get_supabase_client)
 ):
     """
     Generate custom reports.
@@ -1620,7 +1622,7 @@ async def export_business_data(
     end_date: str = Query(None, description="End date in YYYY-MM-DD format"),
     format: str = Query("csv", description="Export format: csv, json, or excel"),
     business_id: int = Depends(get_current_business),
-    db: Session = Depends(get_db)
+    supabase: Client = Depends(get_supabase_client)
 ):
     """
     Export business data.
@@ -1868,7 +1870,7 @@ async def generate_report_from_template(
     customizations: str = Form("{}", description="JSON string of customizations"),
     format: str = Form("pdf", description="Output format: pdf, csv, json"),
     business_id: int = Depends(get_current_business),
-    db: Session = Depends(get_db)
+    supabase: Client = Depends(get_supabase_client)
 ):
     """
     Generate report from template.

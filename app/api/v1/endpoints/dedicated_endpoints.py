@@ -4,14 +4,13 @@ Dedicated Chat Endpoints - Business-specific service
 from __future__ import annotations
 
 import uuid
+import logging
 from typing import Dict, Any
 
-from fastapi import APIRouter, Depends, HTTPException, Path
-from sqlalchemy.orm import Session
+from fastapi import APIRouter, Depends, HTTPException
 
-from app.config.database import get_db
-from app.services.ai.dedicated_ai_handler import DedicatedAIHandler
-from app.models import Business
+from app.config.database import get_supabase_client
+from app.core.ai.types import ChatContext as ChatType
 
 router = APIRouter(tags=["Dedicated AI"])
 
@@ -20,23 +19,58 @@ router = APIRouter(tags=["Dedicated AI"])
 async def dedicated_chat(
     business_identifier: str,
     request: Dict[str, Any],
-    db: Session = Depends(get_db)
+    supabase = Depends(get_supabase_client)  # ✅ Fixed dependency
 ) -> Dict[str, Any]:
-    """Process a dedicated business chat message"""
+    """Dedicated chat for a specific business."""
     session_id = request.get("session_id") or str(uuid.uuid4())
-    message = request.get("message", "").strip()
-    
-    # Resolve business by ID or slug
-    business = None
-    if business_identifier.isdigit():
-        business = db.query(Business).filter(Business.id == int(business_identifier)).first()
-    else:
-        business = db.query(Business).filter(Business.slug == business_identifier).first()
-    
-    if not business:
-        raise HTTPException(status_code=404, detail="Business not found")
-    
-    handler = DedicatedAIHandler(db)
+    message = request.get("message", "")
+    context = request.get("context", {})
+
+    if not message.strip():
+        return {"error": "Message cannot be empty", "session_id": session_id}
+
+    try:
+        # ✅ FIXED: Proper Supabase query instead of SQLAlchemy
+        if business_identifier.isdigit():
+            # Search by ID
+            business_response = supabase.table('businesses').select('*').eq('id', int(business_identifier)).execute()
+        else:
+            # Search by slug
+            business_response = supabase.table('businesses').select('*').eq('slug', business_identifier).execute()
+        
+        if not business_response.data:
+            raise HTTPException(status_code=404, detail="Business not found")
+        
+        business = business_response.data[0]
+        business_id = business['id']
+        
+        # Add business context
+        context["business_id"] = business_id
+        context["selected_business"] = business_id
+
+        # Use Central AI with dedicated chat type
+        central_ai = CentralAIHandler(supabase)  # ✅ Pass supabase instead of db
+        response = await central_ai.chat(
+            message=message,
+            session_id=session_id,
+            chat_type=ChatType.DEDICATED,
+            context=context
+        )
+        
+        return {
+            "message": response.get("message", ""),
+            "session_id": session_id,
+            "success": response.get("success", True),
+            "chat_type": "dedicated",
+            "business_id": business_id,
+            "suggested_actions": [],
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logging.error(f"Dedicated chat error: {e}")
+        raise HTTPException(status_code=500, detail=f"Chat service error: {str(e)}")
     
     # Handle initialization request
     if not message:

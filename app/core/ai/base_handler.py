@@ -14,7 +14,6 @@ try:
     from groq import Groq
 except Exception:  # ImportError or missing dependencies
     Groq = None  # type: ignore
-from sqlalchemy.orm import Session
 
 from app.config.settings import settings
 from app.core.ai.types import RichContext, ChatContext
@@ -23,8 +22,8 @@ from app.core.ai.types import RichContext, ChatContext
 class BaseAIHandler:
     """Base handler providing common AI functionality"""
     
-    def __init__(self, db: Optional[Session] = None):
-        self.db = db
+    def __init__(self, supabase=None):
+        self.supabase = supabase
         self.client = Groq(api_key=settings.GROQ_API_KEY) if (Groq and settings.GROQ_API_KEY) else None
         self.model = settings.GROQ_MODEL or "llama-3.3-70b-versatile"
         self.logger = logging.getLogger(self.__class__.__name__)
