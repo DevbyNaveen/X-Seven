@@ -26,7 +26,7 @@ def get_supabase_client():
             if not SUPABASE_URL or not SUPABASE_KEY:
                 raise ValueError("❌ Supabase credentials missing in .env file")
                 
-            # Create client
+            # Create client - use basic initialization to avoid proxy issues
             _supabase_client = create_client(SUPABASE_URL, SUPABASE_KEY)
             logging.info("✅ Supabase client initialized successfully")
             

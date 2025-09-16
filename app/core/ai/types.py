@@ -44,3 +44,4 @@ class RichContext:
     # Context metadata
     current_time: datetime = field(default_factory=datetime.now)
     request_metadata: Dict[str, Any] = field(default_factory=dict)
+    db: Any = None  # Supabase client

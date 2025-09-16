@@ -9,7 +9,7 @@ from typing import Dict, Any
 from fastapi import APIRouter, Depends, HTTPException
 
 from app.config.database import get_supabase_client
-from app.core.ai.types import ChatContext as ChatType
+from app.services.ai import GlobalAIHandler
 
 router = APIRouter(tags=["Global AI"])
 
@@ -27,12 +27,11 @@ async def global_chat(
     if not message:
         raise HTTPException(status_code=400, detail="Message cannot be empty")
     
-    central_ai = CentralAIHandler(supabase)  # ✅ Pass supabase instead of db
-    response = await central_ai.chat(
+    handler = GlobalAIHandler(supabase)
+    response = await handler.process_message(
         message=message,
         session_id=session_id,
-        chat_type=ChatType.GLOBAL,
-        context=context
+        additional_context=context
     )
     
     return response

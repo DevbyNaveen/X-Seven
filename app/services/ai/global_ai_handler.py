@@ -17,6 +17,7 @@ class GlobalAIHandler(BaseAIHandler):
     def __init__(self, supabase):
         super().__init__(supabase)
         self.logger = logging.getLogger(__name__)
+        self.supabase = supabase
     
     async def process_message(
         self,
@@ -32,7 +33,8 @@ class GlobalAIHandler(BaseAIHandler):
                 chat_context=ChatContext.GLOBAL,
                 session_id=session_id,
                 user_message=message,
-                user_id=user_id
+                user_id=user_id,
+                db=self.supabase  # Pass supabase client to context
             )
             
             # Load global context
@@ -69,6 +71,9 @@ class GlobalAIHandler(BaseAIHandler):
     
     def build_prompt(self, context: RichContext) -> str:
         """Build prompt for global business discovery"""
+        # Debug: log how many businesses were found
+        self.logger.info(f"Building prompt with {len(context.all_businesses)} businesses")
+        
         lines = [
             "You are X-SevenAI, a helpful business discovery assistant.",
             f"Current time: {context.current_time.strftime('%Y-%m-%d %H:%M')}",
@@ -76,12 +81,23 @@ class GlobalAIHandler(BaseAIHandler):
         ]
         
         if context.all_businesses:
-            lines.append("## Available Businesses")
+            lines.append(f"## Available Businesses ({len(context.all_businesses)} found)")
             for business in context.all_businesses[:15]:
                 menu_desc = ", ".join([f"{item['name']} (${item['price']})" 
                                      for item in business.get('sample_menu', [])[:2]])
                 lines.append(f"• **{business['name']}** - {business.get('description', 'Business services')} | {menu_desc or 'Various services'}")
             lines.append("")
+        else:
+            lines.append("## Available Business Categories")
+            lines.extend([
+                "1. **Restaurants** - Fine dining, casual, fast food",
+                "2. **Retail** - Department stores, boutiques, electronics",
+                "3. **Services** - Salons, gyms, medical offices",
+                "4. **Entertainment** - Theaters, venues, arcades",
+                "5. **Education** - Schools, courses, tutoring",
+                "",
+                "*Note: No specific businesses found in database. Please check if businesses are added.*"
+            ])
         
         if context.conversation_history:
             lines.append("## Recent Conversation")

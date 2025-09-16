@@ -15,40 +15,49 @@ logger = logging.getLogger(__name__)
 async def build_global_context(context: RichContext) -> RichContext:
     """Build context for global business discovery"""
     try:
-        from supabase import create_client
-        api_key = settings.SUPABASE_SERVICE_ROLE_KEY or settings.SUPABASE_KEY
-        supabase = create_client(settings.SUPABASE_URL, api_key)
+        logger.info("Starting to build global context...")
+        
+        # Use the supabase client from the context (passed from handler)
+        supabase = context.db
         
         # Load active businesses
-        response = supabase.table('Business').select('*').eq('is_active', True).limit(20).execute()
+        logger.info("Querying businesses...")
+        response = supabase.table('businesses').select('*').eq('is_active', True).limit(20).execute()
         businesses = response.data if response.data else []
+        logger.info(f"Found {len(businesses)} businesses")
         
         # Enhance with sample menu items
         enhanced_businesses = []
         for business in businesses:
-            menu_response = supabase.table('MenuItem').select('*').eq('business_id', business['id']).eq('is_available', True).limit(3).execute()
-            menu_items = menu_response.data if menu_response.data else []
-            
-            enhanced_businesses.append({
-                "id": business['id'],
-                "name": business['name'],
-                "category": business['category'],
-                "description": business['description'],
-                "is_active": business['is_active'],
-                "sample_menu": [
-                    {
-                        "name": item['name'],
-                        "description": item['description'],
-                        "price": float(item['base_price'] or 0)
-                    } for item in menu_items
-                ]
-            })
+            try:
+                menu_response = supabase.table('menu_items').select('*').eq('business_id', business['id']).eq('is_available', True).limit(3).execute()
+                menu_items = menu_response.data if menu_response.data else []
+                
+                enhanced_businesses.append({
+                    "id": business['id'],
+                    "name": business['name'],
+                    "category": business['category'],
+                    "description": business['description'],
+                    "is_active": business['is_active'],
+                    "sample_menu": [
+                        {
+                            "name": item['name'],
+                            "description": item['description'],
+                            "price": float(item['base_price'] or 0)
+                        } for item in menu_items
+                    ]
+                })
+            except Exception as e:
+                logger.error(f"Error processing business {business.get('id')}: {e}")
+                continue
         
         context.all_businesses = enhanced_businesses
         context.request_metadata["context_type"] = "business_discovery"
+        logger.info(f"Successfully loaded {len(enhanced_businesses)} businesses")
         
     except Exception as e:
         logger.error("Failed to load global context: %s", e)
+        logger.exception("Full traceback:")
     
     return context
 
@@ -61,12 +70,12 @@ async def build_dedicated_context(context: RichContext, business_id: int) -> Ric
         supabase = create_client(settings.SUPABASE_URL, api_key)
         
         # Load business
-        business_response = supabase.table('Business').select('*').eq('id', business_id).execute()
+        business_response = supabase.table('businesses').select('*').eq('id', business_id).execute()
         if business_response.data:
             business = business_response.data[0]
             
             # Load menu
-            menu_response = supabase.table('MenuItem').select('*').eq('business_id', business_id).eq('is_available', True).execute()
+            menu_response = supabase.table('menu_items').select('*').eq('business_id', business_id).eq('is_available', True).execute()
             menu_items = menu_response.data if menu_response.data else []
             
             enhanced_business = {
@@ -169,27 +178,29 @@ async def load_conversation_history(
 ) -> List[Dict]:
     """Load conversation history for a session"""
     try:
-        from app.models import Message
+        supabase = context.db
         
-        query = context.db.query(Message).filter(Message.session_id == session_id)
+        # Build query
+        query = supabase.table('messages').select('*').eq('session_id', session_id)
         
         # Scope by chat context
         if chat_context == ChatContext.GLOBAL:
-            query = query.filter(Message.business_id.is_(None))
+            query = query.is_('business_id', None)
         elif chat_context in [ChatContext.DEDICATED, ChatContext.DASHBOARD]:
             if business_id:
-                query = query.filter(Message.business_id == business_id)
+                query = query.eq('business_id', business_id)
             else:
                 return []
         
-        messages = query.order_by(Message.created_at.desc()).limit(20).all()
+        response = query.order('created_at', desc=True).limit(20).execute()
+        messages = response.data if response.data else []
         
         history = []
         for msg in reversed(messages):
             history.append({
-                "role": "user" if msg.sender_type == "customer" else "assistant",
-                "content": msg.content,
-                "timestamp": msg.created_at.isoformat() if msg.created_at else None
+                "role": "user" if msg['sender_type'] == "customer" else "assistant",
+                "content": msg['content'],
+                "timestamp": msg['created_at'] if msg['created_at'] else None
             })
         
         return history
