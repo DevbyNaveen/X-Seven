@@ -5,8 +5,8 @@ Handles global, dedicated, and dashboard chat through Central AI Brain
 """
 from __future__ import annotations
 
-from typing import Dict, Any
-from fastapi import APIRouter, Depends, WebSocket, WebSocketDisconnect, HTTPException, status
+from typing import Dict, Any, Optional
+from fastapi import APIRouter, Depends, WebSocket, WebSocketDisconnect, HTTPException, status, Query
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 import json
@@ -25,8 +25,19 @@ active_connections: Dict[str, WebSocket] = {}
 
 
 @router.post("/global")
-async def global_chat(request: Dict[str, Any], db: Session = Depends(get_db)):
-    """Global discovery chat across all businesses."""
+async def global_chat(
+    request: Dict[str, Any],
+    db: Session = Depends(get_db),
+    stream: bool = Query(False, description="If true, stream the response word‑by‑word (typewriter effect)"),
+    action: Optional[str] = Query(None, description="Optional action: 'recommendations' or 'search'"),
+) -> Any:
+    """Global discovery chat across all businesses.
+
+    - When `stream=False` (default) the endpoint behaves like the original JSON response.
+    - When `stream=True` it returns a `StreamingResponse` that yields Server‑Sent Events
+      containing each word of the AI answer, mimicking the previous `/stream/global/...`
+      endpoint.
+    """
     session_id = request.get("session_id") or str(uuid.uuid4())
     message = request.get("message", "")
     context = request.get("context", {})
@@ -34,22 +45,89 @@ async def global_chat(request: Dict[str, Any], db: Session = Depends(get_db)):
     if not message.strip():
         return {"error": "Message cannot be empty", "session_id": session_id}
 
+    # If an explicit action is requested, handle it specially
+    if action == "recommendations":
+        # Recommendations flow – same as the original /recommendations endpoint
+        preferences = request.get("preferences", {})
+        central_ai = CentralAIHandler(db)
+        rec_response = await central_ai.chat(
+            message="Get business recommendations",
+            session_id=session_id,
+            chat_type=ChatType.GLOBAL,
+            context={"action": "recommendations", "preferences": preferences},
+        )
+        return {
+            "recommendations": rec_response.get("message", ""),
+            "session_id": session_id,
+            "success": rec_response.get("success", True),
+        }
+
+    if action == "search":
+        # Search flow – same as the original /search endpoint
+        query = request.get("query", "")
+        filters = request.get("filters", {})
+        if not query.strip():
+            return {"error": "Search query cannot be empty", "session_id": session_id}
+        central_ai = CentralAIHandler(db)
+        search_response = await central_ai.chat(
+            message=query,
+            session_id=session_id,
+            chat_type=ChatType.GLOBAL,
+            context={"action": "search", "filters": filters},
+        )
+        return {"results": search_response.get("message", ""), "success": True}
+
+    # Default: normal global chat (same as before)
     # Use Central AI with global chat type
     central_ai = CentralAIHandler(db)
     response = await central_ai.chat(
         message=message,
         session_id=session_id,
         chat_type=ChatType.GLOBAL,
-        context=context
+        context=context,
     )
-    
-    return {
-        "message": response.get("message", ""),
-        "session_id": session_id,
-        "success": response.get("success", True),
-        "chat_type": "global",
-        "suggested_actions": [],
-    }
+
+    if not stream:
+        # Normal JSON response
+        return {
+            "message": response.get("message", ""),
+            "session_id": session_id,
+            "success": response.get("success", True),
+            "chat_type": "global",
+            "suggested_actions": [],
+        }
+
+    # Streaming response (typewriter effect)
+    async def generate_stream() -> Any:
+        full_message = response.get("message", "")
+        words = full_message.split(" ")
+        streamed_text = ""
+        for i, word in enumerate(words):
+            streamed_text += word
+            if i < len(words) - 1:
+                streamed_text += " "
+            # Small delay to simulate typing
+            await asyncio.sleep(0.05)
+            data_chunk = {
+                "type": "word",
+                "word": word,
+                "position": i,
+                "partial_message": streamed_text,
+            }
+            yield "data: " + json.dumps(data_chunk) + "\n\n"
+        # Completion event
+        complete_chunk = {
+            "type": "complete",
+            "message": full_message,
+            "chat_type": "global",
+        }
+        yield "data: " + json.dumps(complete_chunk) + "\n\n"
+
+    return StreamingResponse(
+        generate_stream(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "Connection": "keep-alive"},
+    )
 
 
 @router.delete("/dashboard/{business_id}/{session_id}")
@@ -118,16 +196,57 @@ async def dedicated_chat(
     if table_id:
         context["table_id"] = table_id
 
+    # If no message is provided, treat this as a session initialization request
     if not message.strip():
-        return {"error": "Message cannot be empty", "session_id": session_id}
+        # Initialize session – same logic as the removed init endpoint
+        central_ai = CentralAIHandler(db)
+        init_response = await central_ai.chat(
+            message="initialize_session",
+            session_id=session_id,
+            chat_type=ChatType.DEDICATED,
+            context={
+                "action": "initialize_session",
+                "business_id": business_id,
+                "entry_point": entry_point,
+            },
+        )
+        # Also fetch business context for the newly created session
+        context_response = await central_ai.chat(
+            message="get_business_context",
+            session_id=session_id,
+            chat_type=ChatType.DEDICATED,
+            context={
+                "action": "get_business_context",
+                "business_id": business_id,
+            },
+        )
+        return {
+            "success": True,
+            "session_id": session_id,
+            "business_id": business_id,
+            "business_name": resolved_business.name,
+            "welcome_message": init_response.get("message", ""),
+            "entry_point": entry_point,
+            "business_context": context_response.get("message", ""),
+        }
 
-    # Use Central AI with dedicated chat type
+    # Use Central AI with dedicated chat type for normal messages
     central_ai = CentralAIHandler(db)
     response = await central_ai.chat(
         message=message,
         session_id=session_id,
         chat_type=ChatType.DEDICATED,
-        context=context
+        context=context,
+    )
+    # Fetch business context to include in the response
+    context_response = await central_ai.chat(
+        message="get_business_context",
+        session_id=session_id,
+        chat_type=ChatType.DEDICATED,
+        context={
+            "action": "get_business_context",
+            "business_id": business_id,
+        },
     )
     
     return {
@@ -138,6 +257,7 @@ async def dedicated_chat(
         "business_id": business_id,
         "entry_point": entry_point,
         "suggested_actions": [],
+        "business_context": context_response.get("message", ""),
     }
 
 
@@ -178,194 +298,14 @@ async def dashboard_chat(
     }
 
 
-@router.post("/recommendations")
-async def get_recommendations(request: Dict[str, Any], db: Session = Depends(get_db)):
-    """Get personalized business recommendations."""
-    session_id = request.get("session_id") or str(uuid.uuid4())
-    user_preferences = request.get("preferences", {})
-    
-    central_ai = CentralAIHandler(db)
-    response = await central_ai.chat(
-        message="Get business recommendations",
-        session_id=session_id,
-        chat_type=ChatType.GLOBAL,
-        context={"action": "recommendations", "preferences": user_preferences}
-    )
-    
-    return {
-        "recommendations": response.get("message", ""),
-        "session_id": session_id,
-        "success": response.get("success", True),
-    }
 
 
-@router.post("/search")
-async def search_businesses(request: Dict[str, Any], db: Session = Depends(get_db)):
-    """Search for businesses based on query."""
-    query = request.get("query", "")
-    filters = request.get("filters", {})
-    
-    if not query.strip():
-        return {"error": "Search query cannot be empty"}
-    
-    central_ai = CentralAIHandler(db)
-    response = await central_ai.chat(
-        message=query,
-        session_id=str(uuid.uuid4()),
-        chat_type=ChatType.GLOBAL,
-        context={"action": "search", "filters": filters}
-    )
-    
-    return {
-        "results": response.get("message", ""),
-        "success": True,
-    }
 
 
-# Additional dedicated chat endpoints for backward compatibility
-@router.post("/dedicated/{business_identifier}/init")
-async def initialize_dedicated_chat_session(
-    business_identifier: str,
-    request: Dict[str, Any],
-    db: Session = Depends(get_db)
-):
-    """Initialize a new dedicated chat session with welcome context."""
-    session_id = request.get("session_id") or str(uuid.uuid4())
-    entry_point = request.get("entry_point", "direct")
-    
-    # Resolve business by numeric ID or slug
-    from app.models import Business
-    if business_identifier.isdigit():
-        business = db.query(Business).filter(Business.id == int(business_identifier)).first()
-    else:
-        business = db.query(Business).filter(Business.slug == business_identifier).first()
-
-    if not business:
-        return {"success": False, "error": "Business not found", "session_id": session_id}
-
-    # Use Central AI to initialize session
-    central_ai = CentralAIHandler(db)
-    response = await central_ai.chat(
-        message="initialize_session",
-        session_id=session_id,
-        chat_type=ChatType.DEDICATED,
-        context={
-            "action": "initialize_session",
-            "business_id": business.id,
-            "entry_point": entry_point
-        }
-    )
-    
-    return {
-        "success": True,
-        "session_id": session_id,
-        "business_id": business.id,
-        "business_name": business.name,
-        "welcome_message": response.get("message", ""),
-        "entry_point": entry_point
-    }
 
 
-@router.get("/dedicated/{business_identifier}/context")
-async def get_business_context(
-    business_identifier: str,
-    session_id: str,
-    db: Session = Depends(get_db)
-):
-    """Get business context information for the chat."""
-    # Resolve business by numeric ID or slug
-    from app.models import Business
-    if business_identifier.isdigit():
-        business = db.query(Business).filter(Business.id == int(business_identifier)).first()
-    else:
-        business = db.query(Business).filter(Business.slug == business_identifier).first()
-
-    if not business:
-        return {"error": "Business not found"}
-
-    # Use Central AI to get context
-    central_ai = CentralAIHandler(db)
-    response = await central_ai.chat(
-        message="get_business_context",
-        session_id=session_id,
-        chat_type=ChatType.DEDICATED,
-        context={
-            "action": "get_business_context",
-            "business_id": business.id
-        }
-    )
-    
-    return response
 
 
-# Legacy endpoint for backward compatibility
-@router.post("/message")
-async def legacy_chat_message(request: Dict[str, Any], db: Session = Depends(get_db)):
-    """Legacy endpoint - routes to global chat by default."""
-    return await global_chat(request, db)
-
-
-@router.get("/stream/global/{session_id}")
-async def stream_global_chat(
-    session_id: str,
-    message: str,
-    db: Session = Depends(get_db)
-):
-    """Stream global chat with typewriter effect."""
-    
-    central_ai = CentralAIHandler(db)
-    
-    async def generate_stream():
-        try:
-            # Get full response first
-            response = await central_ai.chat(
-                message=message,
-                session_id=session_id,
-                chat_type=ChatType.GLOBAL,
-                context={}
-            )
-            
-            full_message = response.get("message", "")
-            
-            # Stream words with natural timing
-            words = full_message.split(' ')
-            streamed_text = ""
-            
-            for i, word in enumerate(words):
-                streamed_text += word
-                if i < len(words) - 1:
-                    streamed_text += " "
-                
-                await asyncio.sleep(0.05)  # 50ms delay per word
-                
-                data_chunk = {
-                    "type": "word",
-                    "word": word,
-                    "position": i,
-                    "partial_message": streamed_text,
-                }
-                yield "data: " + json.dumps(data_chunk) + "\n\n"
-            
-            # Send completion
-            complete_chunk = {
-                "type": "complete",
-                "message": full_message,
-                "chat_type": "global",
-            }
-            yield "data: " + json.dumps(complete_chunk) + "\n\n"
-            
-        except Exception as e:
-            error_chunk = {"type": "error", "message": str(e)}
-            yield "data: " + json.dumps(error_chunk) + "\n\n"
-    
-    return StreamingResponse(
-        generate_stream(),
-        media_type="text/event-stream",
-        headers={
-            "Cache-Control": "no-cache",
-            "Connection": "keep-alive"
-        }
-    )
 
 
 @router.websocket("/ws/global/{session_id}")
