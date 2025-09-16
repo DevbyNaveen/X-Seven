@@ -6,7 +6,6 @@ from fastapi import APIRouter, Depends, WebSocket, WebSocketDisconnect, HTTPExce
 from sqlalchemy.orm import Session
 
 from app.config.database import get_db
-from app.core.dependencies import get_current_business
 from app.models import Business, Order, Table
 from app.services.websocket.connection_manager import manager
 
@@ -32,7 +31,9 @@ async def dashboard_websocket(
         return
     
     # Accept the WebSocket connection
-    await manager.connect(websocket, f"dashboard_{business_id}")
+    session_id = f"dashboard_{business_id}"
+    await manager.connect(websocket, session_id)
+    manager.add_to_business(session_id, business_id)
     
     try:
         while True:
@@ -42,21 +43,21 @@ async def dashboard_websocket(
             
             # Handle different message types
             if message.get("type") == "ping":
-                await manager.send_personal_message({"type": "pong"}, websocket)
+                await websocket.send_json({"type": "pong"})
             elif message.get("type") == "dashboard_action":
                 # Process dashboard actions and broadcast to relevant clients
                 await handle_dashboard_action(message, business_id, db)
             elif message.get("type") == "ai_chat":
                 # Process AI chat messages
                 response = await process_ai_chat_message(message, business_id)
-                await manager.send_personal_message(response, websocket)
+                await websocket.send_json(response)
             
     except WebSocketDisconnect:
-        manager.disconnect(websocket)
+        manager.disconnect(session_id)
         logger.info(f"Dashboard WebSocket disconnected for business {business_id}")
     except Exception as e:
         logger.error(f"Dashboard WebSocket error for business {business_id}: {str(e)}")
-        manager.disconnect(websocket)
+        manager.disconnect(session_id)
 
 async def handle_dashboard_action(message: Dict[str, Any], business_id: int, db: Session):
     """Handle dashboard actions and broadcast updates."""
@@ -73,12 +74,12 @@ async def handle_dashboard_action(message: Dict[str, Any], business_id: int, db:
             db.commit()
             
             # Broadcast order update
-            await manager.broadcast({
+            await manager.broadcast_to_business(business_id, {
                 "type": "order_update",
                 "order_id": order_id,
                 "status": new_status,
                 "timestamp": message.get("timestamp")
-            }, f"dashboard_{business_id}")
+            })
     
     elif action == "table_status_update":
         # Update table status
@@ -91,12 +92,12 @@ async def handle_dashboard_action(message: Dict[str, Any], business_id: int, db:
             db.commit()
             
             # Broadcast table update
-            await manager.broadcast({
+            await manager.broadcast_to_business(business_id, {
                 "type": "table_update",
                 "table_id": table_id,
                 "status": new_status,
                 "timestamp": message.get("timestamp")
-            }, f"dashboard_{business_id}")
+            })
 
 async def process_ai_chat_message(message: Dict[str, Any], business_id: int) -> Dict[str, Any]:
     """Process AI chat messages and generate responses using Dashboard AI Handler."""

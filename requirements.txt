@@ -107,7 +107,7 @@ boto3==1.29.7
 google-cloud-storage==2.10.0
 
 # APM (Application Performance Monitoring)
-ddtrace==2.3.0
+ddtrace
 
 # Database & Authentication
 supabase==2.3.1
