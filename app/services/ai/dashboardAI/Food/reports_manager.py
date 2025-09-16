@@ -18,6 +18,34 @@ class ReportsManager:
     def __init__(self, db: Session):
         self.db = db
     
+    def _get_business_settings(self, business_id: int) -> Dict[str, Any]:
+        """Get business settings from database, including financial and operational configurations."""
+        try:
+            # Import Business model here to avoid circular imports
+            from app.models import Business
+            
+            business = self.db.query(Business).filter(Business.id == business_id).first()
+            if business and business.settings:
+                return business.settings
+            return {}
+        except Exception:
+            # Return default settings if business not found or error occurs
+            return {
+                'financial_reporting': {
+                    'cost_of_goods_percentage': 0.30,
+                    'labor_cost_percentage': 0.25,
+                    'overhead_cost_percentage': 0.12
+                },
+                'customer_segmentation': {
+                    'high_value_threshold': 5,
+                    'medium_value_threshold': 2
+                },
+                'operational_metrics': {
+                    'target_prep_time_minutes': 15,
+                    'target_cancellation_rate': 0.05
+                }
+            }
+    
     async def handle_reports_request(self, business_id: int, intent: Dict[str, Any]) -> Dict[str, Any]:
         """Handle reports-related requests from the AI"""
         action = intent.get("action", "")
@@ -459,20 +487,27 @@ class ReportsManager:
             # Customer lifetime value (simplified)
             avg_customer_value = total_revenue / unique_customers if unique_customers > 0 else 0
             
-            # Customer segments
+            # Get customer segmentation thresholds from business settings
+            business_settings = self._get_business_settings(business_id)
+            customer_config = business_settings.get('customer_segmentation', {})
+            
+            # Use business-specific thresholds or fall back to defaults
+            high_value_threshold = customer_config.get('high_value_threshold', 5)
+            medium_value_threshold = customer_config.get('medium_value_threshold', 2)
+            
             high_value_customers = [
                 cid for cid, count in customer_order_counts.items() 
-                if count >= 5  # 5 or more orders
+                if count >= high_value_threshold  # Configurable threshold
             ]
             
             medium_value_customers = [
                 cid for cid, count in customer_order_counts.items() 
-                if 2 <= count < 5  # 2-4 orders
+                if medium_value_threshold <= count < high_value_threshold
             ]
             
             low_value_customers = [
                 cid for cid, count in customer_order_counts.items() 
-                if count == 1  # 1 order
+                if count < medium_value_threshold
             ]
             
             # Format response
@@ -565,10 +600,18 @@ class ReportsManager:
                 for day, revenue in sorted(daily_revenue.items())
             ]
             
-            # Simulated cost data (in a real implementation, this would come from accounting systems)
-            cost_of_goods = total_revenue * random.uniform(0.25, 0.35)  # 25-35% of revenue
-            labor_costs = total_revenue * random.uniform(0.20, 0.30)     # 20-30% of revenue
-            overhead_costs = total_revenue * random.uniform(0.10, 0.15)   # 10-15% of revenue
+            # Get business-specific cost parameters from settings
+            business_settings = self._get_business_settings(business_id)
+            cost_config = business_settings.get('financial_reporting', {})
+            
+            # Use business-specific cost percentages or fall back to defaults
+            cog_percentage = cost_config.get('cost_of_goods_percentage', 0.30)
+            labor_percentage = cost_config.get('labor_cost_percentage', 0.25)
+            overhead_percentage = cost_config.get('overhead_cost_percentage', 0.12)
+            
+            cost_of_goods = total_revenue * cog_percentage
+            labor_costs = total_revenue * labor_percentage
+            overhead_costs = total_revenue * overhead_percentage
             
             total_costs = cost_of_goods + labor_costs + overhead_costs
             gross_profit = total_revenue - cost_of_goods
@@ -681,6 +724,11 @@ class ReportsManager:
             cancellations = status_counts.get("cancelled", 0)
             cancellation_rate = (cancellations / total_orders * 100) if total_orders > 0 else 0
             
+            # Get operational settings
+            business_settings = self._get_business_settings(business_id)
+            operational_config = business_settings.get('operational_metrics', {})
+            peak_threshold = operational_config.get('peak_hour_threshold', 10)
+            
             # Peak hours analysis
             hourly_orders = {}
             for order in orders:
@@ -689,6 +737,7 @@ class ReportsManager:
                     hourly_orders[hour] = 0
                 hourly_orders[hour] += 1
             
+            peak_hours = [hour for hour, count in hourly_orders.items() if count >= peak_threshold]
             peak_hour = max(hourly_orders, key=hourly_orders.get) if hourly_orders else None
             
             # Daily order volume

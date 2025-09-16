@@ -1,7 +1,7 @@
 # app/api/v1/endpoints/central_chat_endpoints.py
 """
-Update Central Chat Endpoints using Central AI Brain
-Handles all chat types through the central handler
+Unified Chat Endpoints - Consolidated API for all chat types
+Handles global, dedicated, and dashboard chat through Central AI Brain
 """
 from __future__ import annotations
 
@@ -86,9 +86,9 @@ async def delete_dashboard_conversation(
     }
 
 
-@router.post("/dedicated/{business_id}")
+@router.post("/dedicated/{business_identifier}")
 async def dedicated_chat(
-    business_id: int, 
+    business_identifier: str,
     request: Dict[str, Any], 
     db: Session = Depends(get_db)
 ):
@@ -96,10 +96,27 @@ async def dedicated_chat(
     session_id = request.get("session_id") or str(uuid.uuid4())
     message = request.get("message", "")
     context = request.get("context", {})
+    entry_point = request.get("entry_point", "direct")
+    table_id = request.get("table_id")
+
+    # Resolve business by numeric ID or slug
+    from app.models import Business
+    resolved_business = None
+    if business_identifier.isdigit():
+        resolved_business = db.query(Business).filter(Business.id == int(business_identifier)).first()
+    else:
+        resolved_business = db.query(Business).filter(Business.slug == business_identifier).first()
+
+    if not resolved_business:
+        return {"error": "Business not found", "session_id": session_id}
+    business_id = resolved_business.id
     
     # Add business context
     context["business_id"] = business_id
     context["selected_business"] = business_id
+    context["entry_point"] = entry_point
+    if table_id:
+        context["table_id"] = table_id
 
     if not message.strip():
         return {"error": "Message cannot be empty", "session_id": session_id}
@@ -119,6 +136,7 @@ async def dedicated_chat(
         "success": response.get("success", True),
         "chat_type": "dedicated",
         "business_id": business_id,
+        "entry_point": entry_point,
         "suggested_actions": [],
     }
 
@@ -202,6 +220,82 @@ async def search_businesses(request: Dict[str, Any], db: Session = Depends(get_d
         "results": response.get("message", ""),
         "success": True,
     }
+
+
+# Additional dedicated chat endpoints for backward compatibility
+@router.post("/dedicated/{business_identifier}/init")
+async def initialize_dedicated_chat_session(
+    business_identifier: str,
+    request: Dict[str, Any],
+    db: Session = Depends(get_db)
+):
+    """Initialize a new dedicated chat session with welcome context."""
+    session_id = request.get("session_id") or str(uuid.uuid4())
+    entry_point = request.get("entry_point", "direct")
+    
+    # Resolve business by numeric ID or slug
+    from app.models import Business
+    if business_identifier.isdigit():
+        business = db.query(Business).filter(Business.id == int(business_identifier)).first()
+    else:
+        business = db.query(Business).filter(Business.slug == business_identifier).first()
+
+    if not business:
+        return {"success": False, "error": "Business not found", "session_id": session_id}
+
+    # Use Central AI to initialize session
+    central_ai = CentralAIHandler(db)
+    response = await central_ai.chat(
+        message="initialize_session",
+        session_id=session_id,
+        chat_type=ChatType.DEDICATED,
+        context={
+            "action": "initialize_session",
+            "business_id": business.id,
+            "entry_point": entry_point
+        }
+    )
+    
+    return {
+        "success": True,
+        "session_id": session_id,
+        "business_id": business.id,
+        "business_name": business.name,
+        "welcome_message": response.get("message", ""),
+        "entry_point": entry_point
+    }
+
+
+@router.get("/dedicated/{business_identifier}/context")
+async def get_business_context(
+    business_identifier: str,
+    session_id: str,
+    db: Session = Depends(get_db)
+):
+    """Get business context information for the chat."""
+    # Resolve business by numeric ID or slug
+    from app.models import Business
+    if business_identifier.isdigit():
+        business = db.query(Business).filter(Business.id == int(business_identifier)).first()
+    else:
+        business = db.query(Business).filter(Business.slug == business_identifier).first()
+
+    if not business:
+        return {"error": "Business not found"}
+
+    # Use Central AI to get context
+    central_ai = CentralAIHandler(db)
+    response = await central_ai.chat(
+        message="get_business_context",
+        session_id=session_id,
+        chat_type=ChatType.DEDICATED,
+        context={
+            "action": "get_business_context",
+            "business_id": business.id
+        }
+    )
+    
+    return response
 
 
 # Legacy endpoint for backward compatibility
@@ -360,22 +454,37 @@ async def websocket_global_chat(
         active_connections.pop(session_id, None)
 
 
-@router.websocket("/ws/dedicated/{business_id}/{session_id}")
+@router.websocket("/ws/dedicated/{business_identifier}/{session_id}")
 async def websocket_dedicated_chat(
     websocket: WebSocket, 
-    business_id: int,
+    business_identifier: str,
     session_id: str, 
     table_id: int = None,
     db: Session = Depends(get_db)
 ):
     """WebSocket for dedicated business chat with streaming."""
     await websocket.accept()
+    
+    # Resolve business by numeric ID or slug
+    from app.models import Business
+    resolved_business = None
+    if business_identifier.isdigit():
+        resolved_business = db.query(Business).filter(Business.id == int(business_identifier)).first()
+    else:
+        resolved_business = db.query(Business).filter(Business.slug == business_identifier).first()
+
+    if not resolved_business:
+        await websocket.send_json({
+            "type": "error",
+            "message": "Business not found"
+        })
+        await websocket.close()
+        return
+    
+    business_id = resolved_business.id
     active_connections[f"{business_id}_{session_id}"] = websocket
 
-    # Get business info for welcome message
-    from app.models import Business
-    business = db.query(Business).filter(Business.id == business_id).first()
-    business_name = business.name if business else f"Business {business_id}"
+    business_name = resolved_business.name if resolved_business else f"Business {business_id}"
 
     await websocket.send_json({
         "type": "connected",
@@ -395,6 +504,7 @@ async def websocket_dedicated_chat(
             # Add business context
             context["business_id"] = business_id
             context["selected_business"] = business_id
+            context["entry_point"] = "direct"
             if table_id:
                 context["table_id"] = table_id
             

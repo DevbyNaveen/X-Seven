@@ -39,15 +39,33 @@ async def dashboard_websocket(
             await websocket.close(code=4003, reason="Invalid authentication token")
             return
             
-        # Extract business_id from token payload
-        token_business_id = payload.get("business_id")
+        # Extract business_id from token payload with multiple possible locations
+        token_business_id = None
+        
+        # Check for business_id in different possible locations in the token
+        if "business_id" in payload:
+            token_business_id = payload.get("business_id")
+        elif "app_metadata" in payload and isinstance(payload.get("app_metadata"), dict):
+            # Check app_metadata for business_id
+            app_metadata = payload.get("app_metadata", {})
+            token_business_id = app_metadata.get("business_id")
+        elif "user_metadata" in payload and isinstance(payload.get("user_metadata"), dict):
+            # Check user_metadata for business_id
+            user_metadata = payload.get("user_metadata", {})
+            token_business_id = user_metadata.get("business_id")
+        
         if not token_business_id:
             await websocket.close(code=4003, reason="Token does not contain business context")
             return
             
         # Ensure the user is accessing their own business
-        if int(token_business_id) != business_id:
-            await websocket.close(code=4003, reason="Unauthorized access to business")
+        try:
+            token_business_id_int = int(token_business_id)
+            if token_business_id_int != business_id:
+                await websocket.close(code=4003, reason="Unauthorized access to business")
+                return
+        except (ValueError, TypeError):
+            await websocket.close(code=4003, reason="Invalid business_id format in token")
             return
             
     except Exception as e:

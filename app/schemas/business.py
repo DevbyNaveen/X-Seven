@@ -24,18 +24,46 @@ class BusinessUpdate(BaseSchema):
     """Update business fields."""
     name: Optional[str] = None
     description: Optional[str] = None
+    category: Optional[str] = None
+    subscription_plan: Optional[str] = None
+    subscription_status: Optional[str] = None
+    is_active: Optional[bool] = None
+    trial_ends_at: Optional[datetime] = None
+    stripe_customer_id: Optional[str] = None
+    stripe_subscription_id: Optional[str] = None
+    phone_config: Optional[str] = None
+    custom_phone_number: Optional[str] = None
+    custom_whatsapp_number: Optional[str] = None
+    custom_phone_sid: Optional[str] = None
+    phone_features: Optional[Dict[str, Any]] = None
+    phone_usage: Optional[Dict[str, Any]] = None
+    custom_number_monthly_cost: Optional[float] = None
     contact_info: Optional[Dict[str, Any]] = None
     settings: Optional[Dict[str, Any]] = None
     branding_config: Optional[Dict[str, Any]] = None
+    category_config: Optional[Dict[str, Any]] = None
 
 
 class BusinessResponse(BusinessBase, IDSchema, TimestampSchema):
     """Business response with all fields."""
-    subscription_plan: SubscriptionPlan
+    category: Optional[str] = None
+    subscription_plan: str
+    subscription_status: str
     is_active: bool
+    trial_ends_at: Optional[datetime] = None
+    stripe_customer_id: Optional[str] = None
+    stripe_subscription_id: Optional[str] = None
+    phone_config: str
+    custom_phone_number: Optional[str] = None
+    custom_whatsapp_number: Optional[str] = None
+    custom_phone_sid: Optional[str] = None
+    phone_features: Dict[str, Any]
+    phone_usage: Dict[str, Any]
+    custom_number_monthly_cost: float
     contact_info: Dict[str, Any]
     settings: Dict[str, Any]
     branding_config: Dict[str, Any]
+    category_config: Dict[str, Any]
     
     class Config:
         json_schema_extra = {

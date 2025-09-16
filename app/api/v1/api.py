@@ -33,7 +33,7 @@ api_router.include_router(
 api_router.include_router(
     central_chat.router,
     prefix="/chat",
-    tags=["Chat"]
+    tags=["Central AI"]
 )
 
 api_router.include_router(

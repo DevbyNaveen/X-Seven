@@ -149,14 +149,14 @@ class RAGSearch:
                 for term in search_terms:
                     term_filter = f"%{term}%"
                     or_conditions.extend([
-                        db_query.ilike('name', term_filter),
-                        db_query.ilike('description', term_filter),
-                        db_query.ilike('category', term_filter)
+                        f"name.ilike.{term_filter}",
+                        f"description.ilike.{term_filter}",
+                        f"category.ilike.{term_filter}"
                     ])
                 
                 if or_conditions:
                     # Use or() method for Supabase client
-                    db_query = db_query.or_(','.join([f"name.ilike.{term_filter}", f"description.ilike.{term_filter}", f"category.ilike.{term_filter}"]))
+                    db_query = db_query.or_(','.join(or_conditions))
             
             # Apply additional filters
             if filters:
@@ -229,12 +229,12 @@ class RAGSearch:
                 for term in search_terms:
                     term_filter = f"%{term}%"
                     or_conditions.extend([
-                        db_query.ilike('name', term_filter),
-                        db_query.ilike('description', term_filter)
+                        f"name.ilike.{term_filter}",
+                        f"description.ilike.{term_filter}"
                     ])
                 
                 if or_conditions:
-                    db_query = db_query.or_(','.join([f"name.ilike.{term_filter}", f"description.ilike.{term_filter}"]))
+                    db_query = db_query.or_(','.join(or_conditions))
             
             # Execute query and format results
             response = db_query.execute()
@@ -343,12 +343,10 @@ class RAGSearch:
                 
                 for term in search_terms:
                     term_filter = f"%{term}%"
-                    or_conditions.append(db_query.ilike('content', term_filter))
+                    or_conditions.append(f"content.ilike.{term_filter}")
                 
                 if or_conditions:
-                    # Use or() method for Supabase client
-                    search_conditions = [f"content.ilike.{term_filter}" for term in search_terms]
-                    db_query = db_query.or_(','.join(search_conditions))
+                    db_query = db_query.or_(','.join(or_conditions))
             
             # Order by created time and limit results
             response = db_query.order('created_at', desc=True).limit(limit).execute()
