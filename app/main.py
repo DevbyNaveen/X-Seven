@@ -88,7 +88,7 @@ async def health_check():
 @app.get("/test-rag")
 async def test_rag(supabase = Depends(get_supabase_client)):
     """Test endpoint for RAG functionality."""
-    from app.services.ai.centralAI.rag_search import RAGSearch
+    from app.services.ai.rag_search import RAGSearch
     rag_search = RAGSearch(supabase)
     test_results = rag_search.test_search_functionality()
     return {

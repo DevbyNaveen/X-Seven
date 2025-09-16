@@ -4,8 +4,7 @@ from sqlalchemy.orm import Session
 from datetime import datetime
 import logging
 from app.models import Business, User, Order
-from app.services.ai.language_service import LanguageService
-from app.services.ai import ModernConversationHandler
+from app.services.ai import UnifiedAIHandler, ChatType
 from app.schemas.whatsapp import WhatsAppMessage, WhatsAppInteractiveMessage
 
 logger = logging.getLogger(__name__)
@@ -21,7 +20,6 @@ class UniversalWhatsAppService:
 
     def __init__(self, db: Session):
         self.db = db
-        self.language_service = LanguageService()
         self.active_sessions: Dict[str, Dict[str, Any]] = {}  # phone -> session data
 
     async def handle_universal_message(
@@ -37,12 +35,12 @@ class UniversalWhatsAppService:
         # Get or create session
         session = self.active_sessions.get(user_phone, {})
 
-        # Detect language
-        lang_result = self.language_service.detect_language(message.message_text)
-        language = lang_result.detected_language.value
-
-        # Update session language
-        session['language'] = language
+        # Use user's previous language preference or default to English
+        language = session.get('language', 'en')
+        
+        # Update session
+        if 'language' not in session:
+            session['language'] = language
 
         # Check if user has selected a café
         if 'business_id' not in session:
@@ -124,10 +122,7 @@ class UniversalWhatsAppService:
             }
 
             # Send welcome message for selected café
-            welcome = self.language_service.get_template(
-                language,
-                'welcome'
-            )
+            welcome = "Welcome to"
 
             return {
                 'type': 'text',
@@ -150,10 +145,8 @@ class UniversalWhatsAppService:
     ) -> WhatsAppInteractiveMessage:
         """Format café list as WhatsApp interactive message."""
 
-        header = self.language_service.get_template(
-            language,
-            'select_cafe'
-        )
+        # Simple header text instead of language templates
+        header = "Select a Café"
 
         list_items = []
         for business in businesses[:10]:  # WhatsApp limit
@@ -192,19 +185,16 @@ class UniversalWhatsAppService:
                 'message': 'Café not found. Please select again.'
             }
 
-        # Initialize modern conversation handler for this business
-        conversation_handler = ModernConversationHandler(self.db)
+        # Initialize unified AI handler for this business
+        ai_handler = UnifiedAIHandler(self.db)
 
         # Process message with business context
-        response = await conversation_handler.process_message(
-            session_id=f"whatsapp_{user_phone}_{business_id}",
+        response = await ai_handler.process_message(
             message=message.message_text,
-            channel="whatsapp",
-            phone_number=user_phone,
-            language=language,
-            context={
-                'selected_business': business_id,
-                'language': language,
+            session_id=f"whatsapp_{user_phone}_{business_id}",
+            chat_context=ChatType.DEDICATED,
+            business_id=business_id,
+            additional_context={
                 'channel': 'whatsapp',
                 'phone': user_phone
             }

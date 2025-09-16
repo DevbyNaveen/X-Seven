@@ -1,87 +1,31 @@
-"""Language and localization schemas."""
-from typing import Dict, Optional, List
-from pydantic import BaseModel
-from enum import Enum
-
-
-class SupportedLanguage(str, Enum):
-    """Supported languages."""
-    ENGLISH = "en"
-    LATVIAN = "lv"
-    RUSSIAN = "ru"
-    SPANISH = "es"
-    FRENCH = "fr"
-    GERMAN = "de"
-    ITALIAN = "it"
-    PORTUGUESE = "pt"
-    JAPANESE = "ja"
-    KOREAN = "ko"
-    CHINESE = "zh"
-    ARABIC = "ar"
-    HINDI = "hi"
-
-
-class LanguageDetectionResult(BaseModel):
-    """Language detection result."""
-    detected_language: SupportedLanguage
-    confidence: float
-    original_text: str
-
-
-class TranslationRequest(BaseModel):
-    """Translation request."""
-    text: str
-    source_language: Optional[SupportedLanguage] = None
-    target_language: SupportedLanguage
-
-
-class LocalizedContent(BaseModel):
-    """Localized content for multiple languages."""
-    content: Dict[str, str]  # {language_code: translated_text}
-
-    class Config:
-        json_schema_extra = {
-            "example": {
-                "content": {
-                    "en": "Welcome to our café!",
-                    "lv": "Laipni lūdzam mūsu kafejnīcā!",
-                    "ru": "Добро пожаловать в наше кафе!"
-                }
-            }
-        }
-
-
-class MenuTranslation(BaseModel):
-    """Menu item translation."""
-    item_id: int
-    translations: Dict[str, Dict[str, str]]  # {lang: {name, description}}
-
-    class Config:
-        json_schema_extra = {
-            "example": {
-                "item_id": 1,
-                "translations": {
-                    "en": {"name": "Cappuccino", "description": "Rich espresso with foam"},
-                    "lv": {"name": "Kapučīno", "description": "Bagāta espresso ar putām"},
-                    "ru": {"name": "Капучино", "description": "Насыщенный эспрессо с пенкой"}
-                }
-            }
-        }
+"""
+Language and translation schemas for the application.
+"""
+from typing import Optional, Dict, Any
+from pydantic import BaseModel, Field
 
 
 class LanguageResponse(BaseModel):
-    """Language response."""
-    code: str
-    name: str
-    native_name: str
-    is_supported: bool
-    is_default: bool = False
+    """Response schema for language information."""
+    code: str = Field(..., description="ISO 639-1 language code")
+    name: str = Field(..., description="Language name in English")
+    native_name: str = Field(..., description="Language name in the language itself")
+    direction: str = Field(default="ltr", description="Text direction: 'ltr' or 'rtl'")
+
+
+class TranslationRequest(BaseModel):
+    """Request schema for text translation."""
+    text: str = Field(..., description="Text to translate")
+    target_language: str = Field(..., description="Target language code")
+    source_language: Optional[str] = Field(None, description="Source language code (auto-detect if not provided)")
+    context: Optional[str] = Field(None, description="Additional context for better translation")
 
 
 class TranslationResponse(BaseModel):
-    """Translation response."""
-    original_text: str
-    translated_text: str
-    source_language: str
-    target_language: str
-    confidence: float
+    """Response schema for translation results."""
+    original_text: str = Field(..., description="Original text")
+    translated_text: str = Field(..., description="Translated text")
+    source_language: str = Field(..., description="Detected or provided source language code")
+    target_language: str = Field(..., description="Target language code")
+    confidence: Optional[float] = Field(None, description="Translation confidence score (0-1)")
+    metadata: Optional[Dict[str, Any]] = Field(None, description="Additional translation metadata")
