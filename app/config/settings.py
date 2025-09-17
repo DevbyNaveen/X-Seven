@@ -3,6 +3,8 @@ from functools import lru_cache
 from typing import Dict, List, Optional
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
+from dotenv import load_dotenv
+load_dotenv()  # this will force-load .env into os.environ
 
 
 class Settings(BaseSettings):

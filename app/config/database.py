@@ -1,4 +1,4 @@
-"""Supabase database configuration."""
+"""Pure Supabase database configuration."""
 from typing import Optional
 import logging
 from app.config.settings import settings
@@ -6,47 +6,36 @@ from app.config.settings import settings
 # Supabase client (singleton)
 _supabase_client: Optional['Client'] = None
 
-def get_supabase_client() -> Optional['Client']:
-    """Get Supabase client with error handling."""
+def get_supabase_client():
+    """Get Supabase client with proper error handling."""
     global _supabase_client
     
     if _supabase_client is None:
         try:
             from supabase import create_client, Client
             
+            # Get credentials from settings
             SUPABASE_URL = settings.SUPABASE_URL
-            # Prefer service role key for server‑side operations
-            # Choose the most privileged key available for server‑side operations
             SUPABASE_KEY = (
-                settings.SUPABASE_SERVICE_ROLE_KEY
-                or settings.SUPABASE_KEY
-                or settings.SUPABASE_API_KEY
+                settings.SUPABASE_SERVICE_ROLE_KEY or 
+                settings.SUPABASE_KEY or 
+                settings.SUPABASE_API_KEY
             )
-            # Log which key source is being used (masking the actual value for security)
-            if settings.SUPABASE_SERVICE_ROLE_KEY:
-                key_source = "service_role"
-            elif settings.SUPABASE_KEY:
-                key_source = "anon"
-            else:
-                key_source = "api_key"
-            logging.info(f"Supabase client initialized using {key_source} key")
             
-            if SUPABASE_URL and SUPABASE_KEY:
-                # Explicitly pass an empty options dict to prevent proxy issues
-                _supabase_client = create_client(SUPABASE_URL, SUPABASE_KEY)
-            else:
-                raise ValueError("Supabase credentials not configured")
+            # Validate credentials exist
+            if not SUPABASE_URL or not SUPABASE_KEY:
+                raise ValueError("❌ Supabase credentials missing in .env file")
                 
-        except ImportError:
-            logging.error("Supabase client not installed")
-            raise
+            # Create client - use basic initialization to avoid proxy issues
+            _supabase_client = create_client(SUPABASE_URL, SUPABASE_KEY)
+            logging.info("✅ Supabase client initialized successfully")
+            
         except Exception as e:
-            logging.error(f"Failed to initialize Supabase client: {e}")
+            logging.error(f"❌ Failed to initialize Supabase: {e}")
             raise
     
     return _supabase_client
 
-# Global supabase client - lazy initialization
-def get_db():
-    """Get Supabase client for database operations."""
-    return get_supabase_client()
+# ❌ REMOVE THIS CONFUSING FUNCTION:
+# def get_db():
+#     return get_supabase_client()
