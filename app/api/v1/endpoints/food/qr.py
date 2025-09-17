@@ -8,7 +8,7 @@ import io
 import base64
 import json
 
-from app.config.database import get_db
+from app.config.database import get_supabase_client
 from app.core.dependencies import get_current_business, get_current_user
 from app.models import Business, User, Table
 from app.services.utils.qr_generator import QRCodeGenerator
@@ -51,7 +51,7 @@ async def get_food_qr_codes(
     type: Optional[QRCodeType] = Query(None, description="Filter by QR code type"),
     table_id: Optional[int] = Query(None, description="Filter by table ID"),
     business: Business = Depends(get_current_business),
-    db: Session = Depends(get_db)
+    supabase = Depends(get_supabase_client)
 ) -> Any:
     """
     Get existing QR codes for food service.
@@ -117,7 +117,7 @@ async def get_food_qr_codes(
 async def generate_food_qr_code(
     qr_data: QRCodeCreate,
     business: Business = Depends(get_current_business),
-    db: Session = Depends(get_db)
+    supabase = Depends(get_supabase_client)
 ) -> Any:
     """
     Generate new QR codes for food service.
@@ -231,7 +231,7 @@ async def bulk_generate_food_qr_codes(
     count: int = Query(10, description="Number of QR codes to generate"),
     template_id: str = Query("food_standard", description="Template to use"),
     business: Business = Depends(get_current_business),
-    db: Session = Depends(get_db)
+    supabase = Depends(get_supabase_client)
 ) -> Any:
     """
     Bulk generate QR codes for food service.
@@ -305,7 +305,7 @@ async def get_food_qr_analytics(
     qr_id: str,
     time_range: str = Query("30d", regex="^(7d|30d|90d|1y)$"),
     business: Business = Depends(get_current_business),
-    db: Session = Depends(get_db)
+    supabase = Depends(get_supabase_client)
 ) -> Any:
     """
     Get QR code usage stats for food service.
@@ -359,7 +359,7 @@ async def update_food_qr_code(
     qr_id: str,
     update_data: QRCodeUpdate,
     business: Business = Depends(get_current_business),
-    db: Session = Depends(get_db)
+    supabase = Depends(get_supabase_client)
 ) -> Any:
     """
     Update QR code configuration for food service.

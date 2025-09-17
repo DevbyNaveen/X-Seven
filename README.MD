@@ -38,3 +38,5 @@ Appointment Scheduling: Advanced booking system with service providers
 Payment Processing: Integrated payment solutions
 Category-Specific Templates: Instant business setup with industry-specific features
 
+
+uvicorn app.main:app --reload --port 8000

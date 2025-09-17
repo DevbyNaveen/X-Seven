@@ -2,11 +2,9 @@
 import json
 import logging
 from typing import Dict, Any
-from fastapi import APIRouter, Depends, WebSocket, WebSocketDisconnect
-from sqlalchemy.orm import Session
+from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
-from app.config.database import get_db
-from app.core.dependencies import get_current_business
+from app.config.database import get_supabase_client
 from app.models import Business, Order
 from app.services.websocket.connection_manager import manager
 
@@ -16,47 +14,52 @@ router = APIRouter()
 @router.websocket("/kitchen/ws/{business_id}")
 async def kitchen_websocket(
     websocket: WebSocket,
-    business_id: int,
-    db: Session = Depends(get_db)
+    business_id: int
 ):
     """
     Kitchen-specific WebSocket connection.
     
     Order queue changes, preparation time updates, staff notifications.
     """
-    # Verify business exists
-    business = db.query(Business).filter(Business.id == business_id).first()
-    if not business:
-        await websocket.close(code=4004, reason="Business not found")
-        return
-    
-    # Accept the WebSocket connection
-    await manager.connect(websocket, f"kitchen_{business_id}")
-    
+    # Get Supabase client for WebSocket connection
+    supabase = get_supabase_client()
     try:
-        while True:
-            # Receive message from client
-            data = await websocket.receive_text()
-            message = json.loads(data)
-            
-            # Handle different message types
-            if message.get("type") == "ping":
-                await manager.send_personal_message({"type": "pong"}, websocket)
-            elif message.get("type") == "kitchen_action":
-                # Process kitchen actions and broadcast to relevant clients
-                await handle_kitchen_action(message, business_id, db)
-            elif message.get("type") == "staff_notification":
-                # Process staff notifications
-                await handle_staff_notification(message, business_id)
-            
-    except WebSocketDisconnect:
-        manager.disconnect(websocket)
-        logger.info(f"Kitchen WebSocket disconnected for business {business_id}")
-    except Exception as e:
-        logger.error(f"Kitchen WebSocket error for business {business_id}: {str(e)}")
-        manager.disconnect(websocket)
+        # Verify business exists
+        business_response = supabase.table('businesses').select('*').eq('id', business_id).single().execute()
+        if not business_response.data:
+            await websocket.close(code=4004, reason="Business not found")
+            return
+        
+        # Accept the WebSocket connection
+        await manager.connect(websocket, f"kitchen_{business_id}")
+        
+        try:
+            while True:
+                # Receive message from client
+                data = await websocket.receive_text()
+                message = json.loads(data)
+                
+                # Handle different message types
+                if message.get("type") == "ping":
+                    await manager.send_personal_message({"type": "pong"}, websocket)
+                elif message.get("type") == "kitchen_action":
+                    # Process kitchen actions and broadcast to relevant clients
+                    await handle_kitchen_action(message, business_id, supabase)
+                elif message.get("type") == "staff_notification":
+                    # Process staff notifications
+                    await handle_staff_notification(message, business_id)
+                
+        except WebSocketDisconnect:
+            manager.disconnect(websocket)
+            logger.info(f"Kitchen WebSocket disconnected for business {business_id}")
+        except Exception as e:
+            logger.error(f"Kitchen WebSocket error for business {business_id}: {str(e)}")
+            manager.disconnect(websocket)
+    finally:
+        # Supabase client doesn't need explicit closing
+        pass
 
-async def handle_kitchen_action(message: Dict[str, Any], business_id: int, db: Session):
+async def handle_kitchen_action(message: Dict[str, Any], business_id: int, supabase):
     """Handle kitchen actions and broadcast updates."""
     action = message.get("action")
     
@@ -65,10 +68,9 @@ async def handle_kitchen_action(message: Dict[str, Any], business_id: int, db: S
         order_id = message.get("order_id")
         new_status = message.get("status")
         
-        order = db.query(Order).filter(Order.id == order_id, Order.business_id == business_id).first()
-        if order:
-            order.status = new_status
-            db.commit()
+        order_response = supabase.table('orders').select('*').eq('id', order_id).eq('business_id', business_id).single().execute()
+        if order_response.data:
+            supabase.table('orders').update({'status': new_status}).eq('id', order_id).execute()
             
             # Broadcast order queue update
             await manager.broadcast({
@@ -83,8 +85,8 @@ async def handle_kitchen_action(message: Dict[str, Any], business_id: int, db: S
         order_id = message.get("order_id")
         prep_time = message.get("prep_time")
         
-        order = db.query(Order).filter(Order.id == order_id, Order.business_id == business_id).first()
-        if order:
+        order_response = supabase.table('orders').select('*').eq('id', order_id).eq('business_id', business_id).single().execute()
+        if order_response.data:
             # In a real implementation, you might store this in a separate field
             # For now, we'll just broadcast the update
             await manager.broadcast({

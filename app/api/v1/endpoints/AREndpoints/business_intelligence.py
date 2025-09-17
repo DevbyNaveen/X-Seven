@@ -10,8 +10,8 @@ import logging
 from datetime import datetime, timedelta
 import random
 import json
-
-from app.config.database import get_db
+from supabase import create_client, Client
+from app.config.database import get_supabase_client
 from app.core.dependencies import get_current_business
 from app.models.order import Order
 from app.models.business import Business
@@ -31,7 +31,7 @@ router = APIRouter()
 async def get_profitability_analysis(
     period: str = Query("monthly", description="Analysis period: daily, weekly, monthly"),
     business_id: int = Depends(get_current_business),
-    db: Session = Depends(get_db)
+    supabase: Client = Depends(get_supabase_client)
 ):
     """
     Profit margin analysis.
@@ -118,7 +118,7 @@ async def get_profitability_analysis(
 @router.get("/analytics/cost-analysis")
 async def get_cost_analysis(
     business_id: int = Depends(get_current_business),
-    db: Session = Depends(get_db)
+    supabase: Client = Depends(get_supabase_client)
 ):
     """
     Operating cost breakdown.
@@ -203,7 +203,7 @@ async def get_cost_analysis(
 @router.get("/analytics/seasonal-trends")
 async def get_seasonal_trends(
     business_id: int = Depends(get_current_business),
-    db: Session = Depends(get_db)
+    supabase: Client = Depends(get_supabase_client)
 ):
     """
     Seasonal pattern identification.
@@ -304,7 +304,7 @@ async def get_seasonal_trends(
 @router.get("/analytics/competitive-position")
 async def get_competitive_position(
     business_id: int = Depends(get_current_business),
-    db: Session = Depends(get_db)
+    supabase: Client = Depends(get_supabase_client)
 ):
     """
     Market performance benchmarking.
@@ -411,7 +411,7 @@ async def get_competitive_position(
 async def get_growth_metrics(
     months: int = Query(12, description="Number of months to analyze for growth"),
     business_id: int = Depends(get_current_business),
-    db: Session = Depends(get_db)
+    supabase: Client = Depends(get_supabase_client)
 ):
     """
     Business growth indicators.
@@ -550,7 +550,7 @@ async def get_growth_metrics(
 @router.get("/analytics/predictive-modeling")
 async def get_predictive_modeling(
     business_id: int = Depends(get_current_business),
-    db: Session = Depends(get_db)
+    supabase: Client = Depends(get_supabase_client)
 ):
     """
     AI-powered predictions.
@@ -667,7 +667,7 @@ async def get_predictive_modeling(
 async def get_anomaly_detection(
     days: int = Query(30, description="Number of days to analyze for anomalies"),
     business_id: int = Depends(get_current_business),
-    db: Session = Depends(get_db)
+    supabase: Client = Depends(get_supabase_client)
 ):
     """
     Unusual pattern identification.
@@ -782,7 +782,7 @@ async def get_anomaly_detection(
 async def get_demand_forecasting(
     days: int = Query(30, description="Number of days to forecast"),
     business_id: int = Depends(get_current_business),
-    db: Session = Depends(get_db)
+    supabase: Client = Depends(get_supabase_client)
 ):
     """
     Future demand prediction.
@@ -907,7 +907,7 @@ async def get_demand_forecasting(
 @router.get("/analytics/optimization-recommendations")
 async def get_optimization_recommendations(
     business_id: int = Depends(get_current_business),
-    db: Session = Depends(get_db)
+    supabase: Client = Depends(get_supabase_client)
 ):
     """
     AI improvement suggestions.
@@ -1057,7 +1057,7 @@ async def get_optimization_recommendations(
 async def get_scenario_planning(
     scenario: str = Query("growth", description="Scenario type: growth, downturn, expansion, cost_reduction"),
     business_id: int = Depends(get_current_business),
-    db: Session = Depends(get_db)
+    supabase: Client = Depends(get_supabase_client)
 ):
     """
     What-if analysis.

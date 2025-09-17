@@ -1,8 +1,7 @@
 """Updated business endpoints with phone configuration."""
 from typing import Any
 from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy.orm import Session
-from app.config.database import get_db
+from app.config.database import get_supabase_client
 from app.core.dependencies import get_current_business
 from app.models import Business, PhoneNumberType, User
 from app.schemas.business import BusinessPhoneConfig, PhoneProvisioningResponse
@@ -13,11 +12,11 @@ router = APIRouter()
 
 
 @router.post("/{business_id}/phone-setup", response_model=PhoneProvisioningResponse)
-async def setup_phone_configuration(
+async def configure_phone_setup(
     business_id: int,
     config: BusinessPhoneConfig,
     current_business: Business = Depends(get_current_business),
-    db: Session = Depends(get_db)
+    supabase = Depends(get_supabase_client)
 ) -> Any:
     """
     Configure phone setup for a business.
@@ -29,7 +28,7 @@ async def setup_phone_configuration(
         )
     
     # Use the corrected PhoneManager
-    phone_manager = MultiProviderPhoneManager(db)
+    phone_manager = MultiProviderPhoneManager(supabase)
     
     result = phone_manager.onboard_business(
         business_id=business_id,
@@ -54,13 +53,13 @@ async def setup_phone_configuration(
 async def get_phone_status(
     business_id: int,
     current_business: Business = Depends(get_current_business),
-    db: Session = Depends(get_db)
+    supabase = Depends(get_supabase_client)
 ) -> Any:
     """Get current phone configuration and usage for a business."""
     if current_business.id != business_id:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not authorized")
     
-    phone_manager = MultiProviderPhoneManager(db)
+    phone_manager = MultiProviderPhoneManager(supabase)
     usage = phone_manager.check_usage_limits(business_id)
     
     return {
@@ -77,11 +76,11 @@ async def get_phone_status(
 
 
 @router.post("/{business_id}/transfer-to-human")
-async def initiate_human_transfer(
+async def transfer_to_human(
     business_id: int,
     body: dict,
     current_business: Business = Depends(get_current_business),
-    db: Session = Depends(get_db)
+    supabase = Depends(get_supabase_client)
 ) -> Any:
     """Initiate transfer to human staff (custom numbers only)."""
     call_sid = body.get("call_sid")

@@ -2,10 +2,7 @@
 from typing import List, Optional
 from fastapi import APIRouter, Depends, HTTPException, status, Query
 from pydantic import BaseModel
-from sqlalchemy.orm import Session
-from sqlalchemy import func
-
-from app.config.database import get_db
+from app.config.database import get_supabase_client
 from app.core.dependencies import get_current_business, get_current_user
 from app.models import Business, User, MenuItem, MenuCategory
 
@@ -57,7 +54,7 @@ async def get_menu_items(
     search: Optional[str] = Query(None, description="Search by name or description"),
     current_business: Business = Depends(get_current_business),
     current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db)
+    supabase = Depends(get_supabase_client)
 ) -> List[dict]:
     """Get all menu items with filtering options."""
     query = db.query(MenuItem).filter(MenuItem.business_id == current_business.id)
@@ -104,7 +101,7 @@ async def create_menu_item(
     item_data: MenuItemCreate,
     current_business: Business = Depends(get_current_business),
     current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db)
+    supabase = Depends(get_supabase_client)
 ) -> dict:
     """Create a new menu item."""
     # Verify category exists for this business
@@ -158,7 +155,7 @@ async def update_menu_item(
     item_data: MenuItemUpdate,
     current_business: Business = Depends(get_current_business),
     current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db)
+    supabase = Depends(get_supabase_client)
 ) -> dict:
     """Update a menu item (price, availability, etc.)."""
     # Find menu item for this business
@@ -205,7 +202,7 @@ async def delete_menu_item(
     item_id: int,
     current_business: Business = Depends(get_current_business),
     current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db)
+    supabase = Depends(get_supabase_client)
 ) -> dict:
     """Remove a menu item."""
     # Find menu item for this business
@@ -232,7 +229,7 @@ async def delete_menu_item(
 async def get_menu_categories(
     current_business: Business = Depends(get_current_business),
     current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db)
+    supabase = Depends(get_supabase_client)
 ) -> List[dict]:
     """Get all menu categories for the business."""
     categories = db.query(MenuCategory).filter(
@@ -255,7 +252,7 @@ async def create_menu_category(
     category_data: MenuCategoryCreate,
     current_business: Business = Depends(get_current_business),
     current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db)
+    supabase = Depends(get_supabase_client)
 ) -> dict:
     """Create a new menu category."""
     # Check if category with same name already exists for this business
@@ -294,7 +291,7 @@ async def update_menu_category(
     category_data: MenuCategoryUpdate,
     current_business: Business = Depends(get_current_business),
     current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db)
+    supabase = Depends(get_supabase_client)
 ) -> dict:
     """Update a menu category."""
     # Find category for this business
@@ -330,7 +327,7 @@ async def delete_menu_category(
     category_id: int,
     current_business: Business = Depends(get_current_business),
     current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db)
+    supabase = Depends(get_supabase_client)
 ) -> dict:
     """Delete a menu category."""
     # Find category for this business
@@ -370,7 +367,7 @@ async def toggle_item_availability(
     availability_data: MenuItemAvailabilityUpdate,
     current_business: Business = Depends(get_current_business),
     current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db)
+    supabase = Depends(get_supabase_client)
 ) -> dict:
     """Toggle item availability."""
     # Find menu item for this business

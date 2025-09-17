@@ -6,7 +6,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy import and_
 from pydantic import BaseModel
 
-from app.config.database import get_db
+from app.config.database import get_supabase_client
 from app.core.dependencies import get_current_business, get_current_user
 from app.models import Table, TableStatus, Business, User, Order, OrderStatus
 from app.schemas.table import TableResponse, TableUpdate
@@ -34,7 +34,7 @@ async def get_food_tables(
     status: Optional[TableStatus] = Query(None, description="Filter by table status"),
     section: Optional[str] = Query(None, description="Filter by section"),
     business: Business = Depends(get_current_business),
-    db: Session = Depends(get_db)
+    supabase = Depends(get_supabase_client)
 ) -> Any:
     """
     Get all tables with current status for food service.
@@ -59,7 +59,7 @@ async def update_table_status(
     table_id: int,
     status: TableStatus,
     business: Business = Depends(get_current_business),
-    db: Session = Depends(get_db)
+    supabase = Depends(get_supabase_client)
 ) -> Any:
     """
     Update table status.
@@ -105,7 +105,7 @@ async def assign_customer_to_table(
     assignment: CustomerAssignment,
     business: Business = Depends(get_current_business),
     current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db)
+    supabase = Depends(get_supabase_client)
 ) -> Any:
     """
     Assign customer to table and create initial order.
@@ -185,7 +185,7 @@ async def check_table_availability(
     section: Optional[str] = Query(None, description="Filter by section"),
     capacity: Optional[int] = Query(None, description="Minimum capacity required"),
     business: Business = Depends(get_current_business),
-    db: Session = Depends(get_db)
+    supabase = Depends(get_supabase_client)
 ) -> Any:
     """
     Check table availability.
@@ -230,7 +230,7 @@ async def check_table_availability(
 async def update_table_layout(
     layout_update: TableLayoutUpdate,
     business: Business = Depends(get_current_business),
-    db: Session = Depends(get_db)
+    supabase = Depends(get_supabase_client)
 ) -> Any:
     """
     Update table layout.

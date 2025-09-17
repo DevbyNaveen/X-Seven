@@ -3,8 +3,9 @@ from fastapi import APIRouter
 from app.api.v1.endpoints import (
     auth,
     business,
-    central_chat_endpoints as central_chat,
-    global_chat_endpoints as global_chat,
+    global_endpoints,
+    dedicated_endpoints,
+    dashboard_endpoints,
     supabase_auth
 )
 from app.api.v1.endpoints.dashboard import business_dashboard as dashboard
@@ -32,15 +33,21 @@ api_router.include_router(
 )
 
 api_router.include_router(
-    central_chat.router,
-    prefix="/chat",
-    tags=["Central Chat"]
+    global_endpoints.router,
+    prefix="/global",
+    tags=["Global AI"]
 )
 
 api_router.include_router(
-    global_chat.router,
-    prefix="/global",
-    tags=["Global Chat"]
+    dedicated_endpoints.router,
+    prefix="/dedicated",
+    tags=["Dedicated AI"]
+)
+
+api_router.include_router(
+    dashboard_endpoints.router,
+    prefix="/dashboard",
+    tags=["Dashboard AI"]
 )
 
 api_router.include_router(
@@ -73,11 +80,7 @@ api_router.include_router(
     tags=["Food QR Code Management"]
 )
 
-api_router.include_router(
-    dashboard.router,
-    prefix="/dashboard",
-    tags=["Business Dashboard"]
-)
+# Note: dashboard_endpoints.router already handles dashboard routes
 
 # WebSocket endpoints for real-time updates
 api_router.include_router(

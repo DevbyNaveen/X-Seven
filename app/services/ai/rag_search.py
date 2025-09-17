@@ -139,7 +139,7 @@ class RAGSearch:
         """
         try:
             # Start building the query
-            db_query = self.db.from_('Business').select('*')
+            db_query = self.db.table('Business').select('*')
             
             # Apply text search if query is provided
             if query:
@@ -148,32 +148,37 @@ class RAGSearch:
                 
                 for term in search_terms:
                     term_filter = f"%{term}%"
-                    or_conditions.append(f"lower(name) like '{term_filter}' or lower(description) like '{term_filter}' or lower(category) like '{term_filter}'")
+                    or_conditions.extend([
+                        f"name.ilike.{term_filter}",
+                        f"description.ilike.{term_filter}",
+                        f"category.ilike.{term_filter}"
+                    ])
                 
                 if or_conditions:
-                    db_query = db_query.filter(or_(*or_conditions))
+                    # Use or() method for Supabase client
+                    db_query = db_query.or_(','.join(or_conditions))
             
             # Apply additional filters
             if filters:
                 if 'category' in filters and filters['category']:
-                    db_query = db_query.filter(f"lower(category) like '%{filters['category']}%'")
+                    db_query = db_query.ilike('category', f"%{filters['category']}%")
                 
                 # Add more filters as needed
                 if 'business_ids' in filters and filters['business_ids']:
-                    db_query = db_query.filter(f"id in ({', '.join(map(str, filters['business_ids']))})")
+                    db_query = db_query.in_('id', filters['business_ids'])
                 
                 if 'min_rating' in filters and filters['min_rating']:
-                    # Assuming Business has rating field
-                    if hasattr(Business, 'rating'):
-                        db_query = db_query.filter(f"rating >= {filters['min_rating']}")
+                    db_query = db_query.gte('rating', filters['min_rating'])
             
             # Execute query and format results
-            businesses = db_query.execute()
+            response = db_query.execute()
+            businesses = response.data if response.data else []
             
             results = []
             for business in businesses:
                 # Get sample menu items for context
-                menu_items = self.db.from_('MenuItem').select('*').filter(f"business_id = {business['id']} and is_available = True").execute()
+                menu_response = self.db.table('MenuItem').select('*').eq('business_id', business['id']).eq('is_available', True).execute()
+                menu_items = menu_response.data if menu_response.data else []
                 
                 results.append({
                     "id": business['id'],
@@ -210,11 +215,11 @@ class RAGSearch:
         """
         try:
             # Start building the query
-            db_query = self.db.from_('MenuItem').select('*').filter("is_available = True")
+            db_query = self.db.table('MenuItem').select('*').eq('is_available', True)
             
             # Limit to specific business if provided
             if business_id:
-                db_query = db_query.filter(f"business_id = {business_id}")
+                db_query = db_query.eq('business_id', business_id)
             
             # Apply text search
             if query:
@@ -223,18 +228,23 @@ class RAGSearch:
                 
                 for term in search_terms:
                     term_filter = f"%{term}%"
-                    or_conditions.append(f"lower(name) like '{term_filter}' or lower(description) like '{term_filter}'")
+                    or_conditions.extend([
+                        f"name.ilike.{term_filter}",
+                        f"description.ilike.{term_filter}"
+                    ])
                 
                 if or_conditions:
-                    db_query = db_query.filter(or_(*or_conditions))
+                    db_query = db_query.or_(','.join(or_conditions))
             
             # Execute query and format results
-            menu_items = db_query.execute()
+            response = db_query.execute()
+            menu_items = response.data if response.data else []
             
             results = []
             for item in menu_items:
                 # Get business info for context
-                business = self.db.from_('Business').select('*').filter(f"id = {item['business_id']}").execute()
+                business_response = self.db.table('Business').select('*').eq('id', item['business_id']).execute()
+                business = business_response.data[0] if business_response.data else None
                 
                 results.append({
                     "id": item['id'],
@@ -242,8 +252,8 @@ class RAGSearch:
                     "description": item['description'],
                     "price": float(item['base_price'] or 0),
                     "business": {
-                        "id": business[0]['id'] if business else None,
-                        "name": business[0]['name'] if business else "Unknown"
+                        "id": business['id'] if business else None,
+                        "name": business['name'] if business else "Unknown"
                     } if business else None
                 })
             
@@ -264,24 +274,28 @@ class RAGSearch:
             Dictionary with business context or None if not found
         """
         try:
-            business = self.db.from_('Business').select('*').filter(f"id = {business_id}").execute()
+            business_response = self.db.table('Business').select('*').eq('id', business_id).execute()
             
-            if not business:
+            if not business_response.data:
                 return None
             
+            business = business_response.data[0]
+            
             # Get menu items
-            menu_items = self.db.from_('MenuItem').select('*').filter(f"business_id = {business_id} and is_available = True").execute()
+            menu_response = self.db.table('MenuItem').select('*').eq('business_id', business_id).eq('is_available', True).execute()
+            menu_items = menu_response.data if menu_response.data else []
             
             # Get recent orders (last 5)
-            recent_orders = self.db.from_('Order').select('*').filter(f"business_id = {business_id}").order('created_at', desc=True).limit(5).execute()
+            orders_response = self.db.table('Order').select('*').eq('business_id', business_id).order('created_at', desc=True).limit(5).execute()
+            recent_orders = orders_response.data if orders_response.data else []
             
             return {
                 "business": {
-                    "id": business[0]['id'],
-                    "name": business[0]['name'],
-                    "category": business[0]['category'],
-                    "description": business[0]['description'],
-                    "is_active": business[0]['is_active']
+                    "id": business['id'],
+                    "name": business['name'],
+                    "category": business['category'],
+                    "description": business['description'],
+                    "is_active": business['is_active']
                 },
                 "menu": [
                     {
@@ -289,7 +303,7 @@ class RAGSearch:
                         "name": item['name'],
                         "description": item['description'],
                         "price": float(item['base_price'] or 0),
-                        "category": item['category_id'] if hasattr(item, 'category_id') else None
+                        "category": item.get('category_id')
                     } for item in menu_items
                 ],
                 "recent_orders": [
@@ -297,8 +311,8 @@ class RAGSearch:
                         "id": order['id'],
                         "customer_name": order['customer_name'],
                         "total_amount": float(order['total_amount'] or 0),
-                        "status": order['status'].value if hasattr(order['status'], 'value') else str(order['status']),
-                        "created_at": order['created_at'].isoformat() if order['created_at'] else None
+                        "status": str(order['status']),
+                        "created_at": order['created_at'] if 'created_at' in order else None
                     } for order in recent_orders
                 ]
             }
@@ -320,7 +334,7 @@ class RAGSearch:
             List of relevant conversation messages
         """
         try:
-            db_query = self.db.from_('Message').select('*').filter(f"session_id = '{session_id}'")
+            db_query = self.db.table('Message').select('*').eq('session_id', session_id)
             
             # Apply text search if query provided
             if query:
@@ -329,20 +343,21 @@ class RAGSearch:
                 
                 for term in search_terms:
                     term_filter = f"%{term}%"
-                    or_conditions.append(f"lower(content) like '{term_filter}'")
+                    or_conditions.append(f"content.ilike.{term_filter}")
                 
                 if or_conditions:
-                    db_query = db_query.filter(or_(*or_conditions))
+                    db_query = db_query.or_(','.join(or_conditions))
             
             # Order by created time and limit results
-            messages = db_query.order('created_at', desc=True).limit(limit).execute()
+            response = db_query.order('created_at', desc=True).limit(limit).execute()
+            messages = response.data if response.data else []
             
             return [
                 {
                     "id": msg['id'],
                     "content": msg['content'],
                     "sender_type": msg['sender_type'],
-                    "created_at": msg['created_at'].isoformat() if msg['created_at'] else None
+                    "created_at": msg['created_at'] if 'created_at' in msg else None
                 } for msg in reversed(messages)  # Reverse to show chronological order
             ]
             
