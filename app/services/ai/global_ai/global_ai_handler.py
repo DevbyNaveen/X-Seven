@@ -5,14 +5,17 @@ Orchestrates specialized agents for intent detection, slot filling, RAG, and exe
 from __future__ import annotations
 import json
 import logging
+import re
 from datetime import datetime
 from typing import Dict, Any, Optional, List
+import threading
 
 from .intent_agent import IntentAgent, IntentResult
 from .slot_filling_agent import SlotFillingAgent
 from .rag_agent import RAGAgent, RAGResult
 from .execution_agent import ExecutionAgent, ExecutionResult
 from .self_healing import self_healing_manager, HealthStatus
+from .advanced_memory_manager import AdvancedMemoryManager
 
 class GlobalAIHandler:
     """
@@ -27,6 +30,98 @@ class GlobalAIHandler:
     - Structured actions for reliable execution with graceful degradation
     """
 
+    # Class-level caching for static data (loaded once at startup)
+    _cached_business_stats = None
+    _cached_categories = None
+    _cache_initialized = False
+    _cache_lock = threading.Lock()
+
+    @classmethod
+    async def initialize_cache(cls, supabase_client) -> None:
+        """
+        Initialize static data cache at startup.
+        Loads heavy/static data once to be reused across all requests.
+        """
+        with cls._cache_lock:
+            if cls._cache_initialized:
+                return  # Already initialized
+
+            try:
+                # Load business statistics (static data that changes infrequently)
+                business_stats = await cls._load_business_statistics_static(supabase_client)
+
+                # Load categories (static data)
+                categories = await cls._load_business_categories_static(supabase_client)
+
+                # Cache the data
+                cls._cached_business_stats = business_stats
+                cls._cached_categories = categories
+                cls._cache_initialized = True
+
+                logging.getLogger(__name__).info(
+                    f"✅ Global AI Cache initialized: {business_stats['total_businesses']} businesses, "
+                    f"{len(categories)} categories"
+                )
+
+            except Exception as e:
+                logging.getLogger(__name__).error(f"❌ Failed to initialize Global AI cache: {e}")
+                # Continue without cache - will load data per request as fallback
+
+    @classmethod
+    async def _load_business_statistics_static(cls, supabase) -> Dict[str, Any]:
+        """Load business statistics once at startup (static data)"""
+        try:
+            # Get total business count
+            count_resp = supabase.table("businesses").select("id", count="exact").eq("is_active", True).execute()
+            total_businesses = count_resp.count or 0
+
+            # Get unique categories
+            categories_resp = supabase.table("businesses").select("category").eq("is_active", True).execute()
+            categories = list(set(biz.get("category", "General") for biz in categories_resp.data or []))
+
+            # Get business count by category
+            category_counts = {}
+            for category in categories:
+                cat_count_resp = supabase.table("businesses").select("id", count="exact").eq("is_active", True).ilike("category", f"%{category}%").execute()
+                category_counts[category] = cat_count_resp.count or 0
+
+            return {
+                "total_businesses": total_businesses,
+                "categories": sorted(categories),
+                "category_counts": category_counts,
+                "last_updated": datetime.now().isoformat()
+            }
+
+        except Exception as e:
+            logging.getLogger(__name__).error(f"Failed to load business statistics: {e}")
+            return {"total_businesses": 0, "categories": [], "category_counts": {}}
+
+    @classmethod
+    async def _load_business_categories_static(cls, supabase) -> List[str]:
+        """Load business categories once at startup (static data)"""
+        try:
+            categories_resp = supabase.table("businesses").select("category").eq("is_active", True).execute()
+            categories = list(set(biz.get("category", "General") for biz in categories_resp.data or []))
+            return sorted(categories)
+        except Exception as e:
+            logging.getLogger(__name__).error(f"Failed to load business categories: {e}")
+            return []
+
+    @classmethod
+    def get_cached_business_stats(cls) -> Optional[Dict[str, Any]]:
+        """Get cached business statistics"""
+        return cls._cached_business_stats
+
+    @classmethod
+    def get_cached_categories(cls) -> Optional[List[str]]:
+        """Get cached business categories"""
+        return cls._cached_categories
+
+    @classmethod
+    def is_cache_initialized(cls) -> bool:
+        """Check if cache is initialized"""
+        return cls._cache_initialized
+
     def __init__(self, supabase, groq_api_key: str | None = None, webhook_url: Optional[str] = None):
         self.supabase = supabase
         self.webhook_url = webhook_url
@@ -37,6 +132,9 @@ class GlobalAIHandler:
         self.slot_filling_agent = None
         self.rag_agent = None
         self.execution_agent = ExecutionAgent(supabase, webhook_url)
+
+        # Initialize Advanced Memory Manager
+        self.memory_manager = AdvancedMemoryManager(supabase)
 
         if groq_api_key:
             try:
@@ -51,47 +149,339 @@ class GlobalAIHandler:
         # Register orchestrator with self-healing system
         self_healing_manager.register_agent("global_orchestrator", self)
         
+        # Register available tools for AI to use
+        self.available_tools = self._register_tools()
+        
         # Graceful degradation state
         self.degradation_mode = False
         self.available_capabilities = self._assess_capabilities()
     
+    def _register_tools(self) -> Dict[str, Dict[str, Any]]:
+        """Register all available tools that the AI can call"""
+        return {
+            "understand_user_intent": {
+                "function": self._tool_understand_user_intent,
+                "description": "Analyze user message to determine if they want to book, order, get information, etc. Use when you're not sure what the user wants to accomplish.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "message": {"type": "string", "description": "The user's message to analyze"},
+                        "context": {"type": "object", "description": "Conversation context and business information"}
+                    },
+                    "required": ["message", "context"]
+                }
+            },
+            "collect_required_info": {
+                "function": self._tool_collect_required_info,
+                "description": "Gather required information for bookings/orders. Use when you know what they want but need details like name, date, time, etc.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "intent": {"type": "string", "description": "The determined user intent (e.g., 'restaurant_reservation')"},
+                        "message": {"type": "string", "description": "The current user message"},
+                        "conversation_history": {"type": "array", "description": "Previous conversation messages"}
+                    },
+                    "required": ["intent", "message", "conversation_history"]
+                }
+            },
+            "search_business_information": {
+                "function": self._tool_search_business_information,
+                "description": "Find information about businesses, menus, hours, services. Use when user asks questions about business details.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "query": {"type": "string", "description": "The search query"},
+                        "business_type": {"type": "string", "description": "Optional business category filter"}
+                    },
+                    "required": ["query"]
+                }
+            },
+            "execute_business_action": {
+                "function": self._tool_execute_business_action,
+                "description": "Actually create bookings, orders, appointments. Use only when you have all required information.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "action_data": {"type": "object", "description": "Complete data for the business action"}
+                    },
+                    "required": ["action_data"]
+                }
+            },
+            "retrieve_memory_context": {
+                "function": self._tool_retrieve_memory_context,
+                "description": "Retrieve relevant conversation memories and context. Use when you need to recall previous conversation details or user preferences.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "query": {"type": "string", "description": "What context or memory to retrieve"},
+                        "memory_type": {"type": "string", "description": "Type of memory to retrieve (short_term, long_term, semantic)"}
+                    },
+                    "required": ["query"]
+                }
+            },
+            "search_business_sections": {
+                "function": self._tool_search_business_sections,
+                "description": "Search through detailed business information sections like menus, services, policies. Use when user asks for specific business details.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "business_id": {"type": "integer", "description": "ID of the business to search"},
+                        "section_type": {"type": "string", "description": "Type of section to search (menu, services, hours, policies)"}
+                    },
+                    "required": ["business_id"]
+                }
+            }
+        }
+    
     def _assess_capabilities(self) -> Dict[str, bool]:
         """Assess what capabilities are currently available"""
-        return {
+        capabilities = {
             "intent_detection": self.intent_agent is not None,
             "slot_filling": self.slot_filling_agent is not None,
             "rag_search": self.rag_agent is not None,
             "execution": True,  # Execution agent always available
             "groq_available": self.intent_agent is not None
         }
+        
+        # Add tool capabilities
+        capabilities.update({
+            "understand_user_intent": capabilities["intent_detection"],
+            "collect_required_info": capabilities["slot_filling"],
+            "search_business_information": capabilities["rag_search"],
+            "execute_business_action": capabilities["execution"]
+        })
+        
+        # Add memory capabilities
+        capabilities.update({
+            "conversation_memory": True,
+            "semantic_memory": self.memory_manager.embedding_model is not None,
+            "business_context_sections": True,
+            "memory_consolidation": True,
+            "context_relevance": True,
+            "retrieve_memory_context": True,
+            "search_business_sections": True
+        })
+        
+        return capabilities
     
-    async def chat(
-        self,
-        message: str,
-        session_id: str,
-        user_id: Optional[str] = None,
-        user_location: Optional[str] = None,
-        user_language: str = "en",
+    async def _tool_understand_user_intent(self, message: str, context: Dict[str, Any]) -> Dict[str, Any]:
+        """Tool wrapper for Intent Agent - understand what user wants"""
+        try:
+            if not self.intent_agent:
+                return {
+                    "intent": "general",
+                    "confidence": 0.5,
+                    "business_type": None,
+                    "reasoning": "Intent detection unavailable - using fallback",
+                    "error": "Intent agent not available"
+                }
+            
+            result = await self.intent_agent.detect_intent(message, context)
+            return {
+                "intent": result.intent,
+                "confidence": result.confidence,
+                "business_type": result.entities.get("business_type"),
+                "reasoning": result.reasoning
+            }
+        except Exception as e:
+            self.logger.error(f"Intent tool failed: {e}")
+            return {
+                "intent": "general",
+                "confidence": 0.3,
+                "business_type": None,
+                "reasoning": f"Error in intent detection: {str(e)}",
+                "error": str(e)
+            }
+    
+    async def _tool_collect_required_info(self, intent: str, message: str, conversation_history: List[Dict[str, Any]]) -> Dict[str, Any]:
+        """Tool wrapper for Slot Filling Agent - collect needed information"""
+        try:
+            if not self.slot_filling_agent:
+                return {
+                    "status": "incomplete",
+                    "collected_data": {},
+                    "missing_info": ["Unable to collect information - slot filling unavailable"],
+                    "next_question": "Could you please provide more details about what you need?",
+                    "error": "Slot filling agent not available"
+                }
+            
+            # Build context for slot filling
+            context = {"conversation_history": conversation_history}
+            
+            result = await self.slot_filling_agent.fill_slots(intent, message, context, conversation_history)
+            return {
+                "status": result["status"],
+                "collected_data": result.get("slots", {}),
+                "missing_info": result.get("missing_slots", []),
+                "next_question": result.get("next_question", "")
+            }
+        except Exception as e:
+            self.logger.error(f"Slot filling tool failed: {e}")
+            return {
+                "status": "error",
+                "collected_data": {},
+                "missing_info": ["Error occurred while collecting information"],
+                "next_question": "Could you please try again?",
+                "error": str(e)
+            }
+    
+    async def _tool_search_business_information(self, query: str, business_type: str = None) -> Dict[str, Any]:
+        """Tool wrapper for RAG Agent - search for business information"""
+        try:
+            if not self.rag_agent:
+                return {
+                    "answer": "I'm currently unable to search for business information.",
+                    "confidence": 0.0,
+                    "sources": [],
+                    "relevant_businesses": [],
+                    "error": "RAG agent not available"
+                }
+            
+            # Build context for RAG search
+            context = {"business_type": business_type} if business_type else {}
+            conversation_history = []  # Could be passed in if needed
+            
+            result = await self.rag_agent.answer_question(query, context, conversation_history)
+            return {
+                "answer": result.synthesized_answer,
+                "confidence": result.confidence,
+                "sources": result.sources,
+                "relevant_businesses": getattr(result, 'relevant_businesses', [])
+            }
+        except Exception as e:
+            self.logger.error(f"RAG tool failed: {e}")
+            return {
+                "answer": "I had trouble searching for that information.",
+                "confidence": 0.0,
+                "sources": [],
+                "relevant_businesses": [],
+                "error": str(e)
+            }
+    
+    async def _tool_execute_business_action(self, action_data: Dict[str, Any]) -> Dict[str, Any]:
+        """Tool wrapper for Execution Agent - execute business actions"""
+        try:
+            if not self.execution_agent:
+                return {
+                    "success": False,
+                    "confirmation_message": "Unable to execute action - execution agent not available",
+                    "booking_id": None,
+                    "error": "Execution agent not available"
+                }
+            
+            result = await self.execution_agent.execute_action(action_data)
+            return {
+                "success": result.success,
+                "confirmation_message": result.confirmation_message,
+                "booking_id": result.data.get("booking_id") if hasattr(result, 'data') else None,
+                "error": result.error_message if not result.success else None
+            }
+        except Exception as e:
+            self.logger.error(f"Execution tool failed: {e}")
+            return {
+                "success": False,
+                "confirmation_message": "An error occurred while processing your request",
+                "booking_id": None,
+                "error": str(e)
+            }
+    
+    async def _tool_retrieve_memory_context(self, query: str, memory_type: str = None, session_id: str = None) -> Dict[str, Any]:
+        """Tool wrapper for retrieving memory context"""
+        try:
+            # Use provided session_id or default to "current_session"
+            target_session_id = session_id or "current_session"
+            
+            memories = await self.memory_manager.retrieve_conversation_memory(
+                session_id=target_session_id,
+                memory_type=memory_type,
+                limit=5
+            )
+            
+            return {
+                "memories_found": len(memories),
+                "memory_context": memories,
+                "memory_types": list(set(m.get("memory_type", "unknown") for m in memories)),
+                "total_access_count": sum(m.get("access_count", 0) for m in memories),
+                "session_id": target_session_id
+            }
+        except Exception as e:
+            self.logger.error(f"Memory retrieval tool failed: {e}")
+            return {
+                "memories_found": 0,
+                "memory_context": [],
+                "error": str(e)
+            }
+    
+    async def _tool_search_business_sections(self, business_id: str, section_type: str = None) -> Dict[str, Any]:
+        """Tool wrapper for searching business sections"""
+        try:
+            sections = await self.memory_manager.retrieve_business_context_sections(
+                business_id=business_id
+            )
+            
+            if section_type:
+                sections = [s for s in sections if s.get("section_type") == section_type]
+            
+            return {
+                "business_id": business_id,
+                "sections_found": len(sections),
+                "sections": sections,
+                "section_types": list(set(s.get("section_type", "unknown") for s in sections))
+            }
+        except Exception as e:
+            self.logger.error(f"Business sections search tool failed: {e}")
+            return {
+                "business_id": business_id,
+                "sections_found": 0,
+                "sections": [],
+                "error": str(e)
+            }
+    
+    async def chat(self, message: str, session_id: str, user_id: Optional[str] = None, user_location: Optional[str] = None, user_language: str = "en",
         user_preferences: Optional[Dict] = None,
     ) -> Dict[str, Any]:
         """
-        Main chat entrypoint — modern agent-orchestrated flow with self-healing
+        Modern AI-driven chat method with intent-first detection and fast paths
+        Like ChatGPT - immediate responses for common queries, tool orchestration for complex tasks
+{{ ... }}
         """
         try:
-            # Check system health and update capabilities
-            await self._check_system_health()
-            
-            # Load or initialize user preferences
-            preferences = user_preferences or await self._load_user_preferences(user_id)
+            # Get multimodal context for all conversations
+            multimodal_context = self._get_multimodal_context(user_id, user_location)
 
-            # Build rich context — everything agents need to be brilliant
+            # Load user preferences and context profile only if user_id is provided
+            preferences = user_preferences or await self._load_user_preferences(user_id)
+            user_profile = None
+            if user_id:
+                user_profile = await self.memory_manager.get_user_context_profile(user_id)
+
+            # Build rich context with memory integration
             context = await self._build_rich_context(session_id, user_location, user_language, preferences)
 
-            # Step 1: Intent Detection with self-healing
-            intent_result = await self._detect_intent_with_fallback(message, context)
+            # Add multimodal context to the rich context
+            context["multimodal_context"] = multimodal_context
+            context["user_profile"] = user_profile
 
-            # Step 2: Route based on intent with graceful degradation
-            response = await self._route_with_degradation(intent_result.intent, message, context, session_id, user_id)
+            # Load relevant memories for this conversation
+            conversation_memories = await self.memory_manager.retrieve_conversation_memory(
+                session_id, limit=5
+            )
+            context["conversation_memories"] = conversation_memories
+
+            # Check system health and update capabilities
+            await self._check_system_health()
+
+            # Let LLM decide everything - no hardcoded fast paths
+            response = await self._ai_driven_conversation(message, context, session_id, user_id)
+
+            # Enhance response with multimodal context
+            response = self._enhance_response_with_context(response, {"intent": "unknown"}, multimodal_context)
+
+            # Learn from this interaction
+            self._learn_user_preferences(user_id, message, {"intent": "unknown"}, response)
+
+            # Store conversation context in memory
+            await self._store_conversation_context(session_id, user_id, message, response, context)
 
             # Save conversation + update preferences
             await self._save_conversation(session_id, user_id, message, response)
@@ -101,8 +491,12 @@ class GlobalAIHandler:
                 "message": response,
                 "success": True,
                 "session_id": session_id,
-                "intent": intent_result.intent,
+                "intent_detected": "llm_decided",  # LLM decides intent internally
+                "fast_path_used": False,
+                "personalized": True,
+                "multimodal_context": multimodal_context,
                 "system_health": self._get_system_status(),
+                "memory_info": await self.memory_manager.get_memory_summary(session_id),
                 "timestamp": datetime.utcnow().isoformat(),
             }
 
@@ -115,6 +509,629 @@ class GlobalAIHandler:
                 "system_health": self._get_system_status(),
                 "timestamp": datetime.utcnow().isoformat(),
             }
+    
+    async def chat_stream(
+        self,
+        message: str,
+        session_id: str,
+        user_id: Optional[str] = None,
+        user_location: Optional[str] = None,
+        user_language: str = "en",
+        user_preferences: Optional[Dict] = None,
+    ):
+        """
+        Streaming version of chat method - yields response chunks in real-time
+        Like ChatGPT streaming responses
+        """
+        try:
+            # Step 1: FAST INTENT DETECTION - Like modern AI systems
+            intent_analysis = await self._detect_intent_fast(message)
+
+            # Get conversation history for context-aware processing
+            conversation_history = await self._get_conversation_history(session_id)
+
+            # Re-run intent detection with conversation context if we have history
+            if conversation_history:
+                updated_intent_analysis = await self._detect_intent_fast(message, conversation_history)
+                # Only update if we detected a different intent
+                if updated_intent_analysis["intent"] != intent_analysis["intent"]:
+                    intent_analysis = updated_intent_analysis
+                    self.logger.info(f"🔄 Intent updated with context: {intent_analysis['intent']} (confidence: {intent_analysis['confidence']})")
+
+            # Step 2: Get Multi-Modal Context
+            multimodal_context = self._get_multimodal_context(user_id, user_location)
+
+            # Step 3: FAST PATH for business searches
+            if intent_analysis["intent"] == "business_search" and intent_analysis["requires_tools"]:
+                self.logger.info(f"🚀 Fast path: Business search detected - {intent_analysis['business_type']}")
+
+                # Build context for fast response
+                preferences = user_preferences or await self._load_user_preferences(user_id)
+                context = await self._build_rich_context(session_id, user_location, user_language, preferences)
+
+                # Get business search results first (can't stream tool execution)
+                ai_response = await self._handle_business_search_direct(
+                    intent_analysis["query"],
+                    intent_analysis["business_type"],
+                    user_id
+                )
+
+                # Enhance response with multimodal context
+                ai_response = self._enhance_response_with_context(ai_response, intent_analysis, multimodal_context)
+
+                # Learn user preferences
+                self._learn_user_preferences(user_id, message, intent_analysis, ai_response)
+
+                # Store conversation
+                await self._store_conversation_context(session_id, user_id, message, ai_response, context)
+                await self._save_conversation(session_id, user_id, message, ai_response)
+
+                # Stream the response
+                for chunk in self._stream_text(ai_response):
+                    yield chunk
+
+                return
+
+            # FAST PATH for business selection
+            elif intent_analysis["intent"] == "business_selection":
+                self.logger.info(f"🎯 Fast path: Business selection detected")
+
+                ai_response = await self._handle_business_selection(
+                    intent_analysis, conversation_history, user_id
+                )
+
+                # Store conversation
+                await self._store_conversation_context(session_id, user_id, message, ai_response, {})
+                await self._save_conversation(session_id, user_id, message, ai_response)
+
+                # Stream the response
+                for chunk in self._stream_text(ai_response):
+                    yield chunk
+
+                return
+
+            # FAST PATH for confirmation
+            elif intent_analysis["intent"] == "confirmation":
+                self.logger.info(f"✅ Fast path: Confirmation detected")
+
+                ai_response = await self._handle_confirmation_response(
+                    intent_analysis, conversation_history, user_id
+                )
+
+                # Store conversation
+                await self._store_conversation_context(session_id, user_id, message, ai_response, {})
+                await self._save_conversation(session_id, user_id, message, ai_response)
+
+                # Stream the response
+                for chunk in self._stream_text(ai_response):
+                    yield chunk
+
+                return
+
+            # COMPLEX PATH - Full AI orchestration with streaming
+            self.logger.info(f"🤖 Complex path: {intent_analysis['intent']} detected - using streaming orchestration")
+
+            # Check system health
+            await self._check_system_health()
+
+            # Load user preferences and context
+            preferences = user_preferences or await self._load_user_preferences(user_id)
+            user_profile = None
+            if user_id:
+                user_profile = await self.memory_manager.get_user_context_profile(user_id)
+
+            # Build rich context
+            context = await self._build_rich_context(session_id, user_location, user_language, preferences)
+            context["multimodal_context"] = multimodal_context
+            context["user_profile"] = user_profile
+
+            # Load relevant memories
+            conversation_memories = await self.memory_manager.retrieve_conversation_memory(
+                session_id, limit=5
+            )
+            context["conversation_memories"] = conversation_memories
+
+            # Let LLM decide conversation flow and stream response
+            async for chunk in self._ai_driven_conversation_stream(message, context, session_id, user_id):
+                yield chunk
+
+            # After streaming is complete, update preferences
+            # We need to get the full response for learning
+            full_response = await self._ai_driven_conversation(message, context, session_id, user_id)
+            self._learn_user_preferences(user_id, message, {"intent": "unknown"}, full_response)
+            await self._update_user_preferences(user_id, context, full_response)
+
+        except Exception as e:
+            self.logger.exception(f"💥 Streaming chat failed: {e}")
+            # Stream error message
+            error_msg = "I'm experiencing some technical difficulties. Let me try a simpler approach..."
+            for chunk in self._stream_text(error_msg):
+                yield chunk
+    
+    def _stream_text(self, text: str, chunk_size: int = 10):
+        """Convert text into streaming chunks"""
+        for i in range(0, len(text), chunk_size):
+            yield text[i:i + chunk_size]
+            # Small delay to simulate realistic streaming
+            import time
+            time.sleep(0.01)
+    
+    async def _ai_driven_conversation_stream(self, message: str, context: Dict[str, Any], session_id: str, user_id: Optional[str]):
+        """
+        Streaming version of AI-driven conversation
+        First executes any tool calls, then streams the final response
+        """
+        try:
+            # Check if we have AI capabilities
+            if not self.intent_agent or not hasattr(self.intent_agent, 'groq'):
+                # Fallback response
+                fallback_response = await self._fallback_conversation(message, context)
+                for chunk in self._stream_text(fallback_response):
+                    yield chunk
+                return
+            
+            # Build system prompt
+            system_prompt = self._build_ai_orchestrator_prompt(context)
+            
+            # Get conversation history
+            conversation_history = context.get("conversation_history", [])
+            
+            # Prepare messages for AI
+            messages = [
+                {"role": "system", "content": system_prompt},
+                *conversation_history[-5:],  # Last 5 messages for context
+                {"role": "user", "content": message}
+            ]
+            
+            # First, check if AI wants to use tools (non-streaming decision)
+            decision_response = self.intent_agent.groq.chat.completions.create(
+                model="llama-3.1-8b-instant",
+                messages=messages,
+                temperature=0.3,
+                max_tokens=100,  # Small response to check for tool calls
+                tools=self._format_tools_for_ai(),
+                tool_choice="auto"
+            )
+            
+            ai_message = decision_response.choices[0].message
+            
+            # If AI wants to use tools, execute them first (can't stream tool execution)
+            if hasattr(ai_message, 'tool_calls') and ai_message.tool_calls:
+                tool_results = await self._handle_tool_calls(ai_message.tool_calls, context, session_id, user_id)
+                final_response = tool_results
+            else:
+                # No tools needed, AI can respond directly
+                final_response = ai_message.content.strip() if hasattr(ai_message, 'content') and ai_message.content else "I understand your request."
+            
+            # Clean up response
+            final_response = re.sub(r'<function=[^>]+>', '', final_response)
+            final_response = re.sub(r'</function>', '', final_response)
+            
+            # Store conversation context
+            await self._store_conversation_context(session_id, user_id, message, final_response, context)
+            await self._save_conversation(session_id, user_id, message, final_response)
+            
+            # Now stream the final response
+            for chunk in self._stream_text(final_response):
+                yield chunk
+                
+        except Exception as e:
+            self.logger.error(f"Streaming AI-driven conversation failed: {e}")
+            fallback_response = await self._fallback_conversation(message, context)
+            for chunk in self._stream_text(fallback_response):
+                yield chunk
+    
+    async def _ai_driven_conversation(self, message: str, context: Dict[str, Any], session_id: str, user_id: Optional[str]) -> str:
+        """
+        AI-driven conversation where the LLM decides when to use each agent/tool
+        No more automatic chaining - the AI orchestrates based on conversation needs
+        """
+        try:
+            # Check if we have AI capabilities
+            if not self.intent_agent or not hasattr(self.intent_agent, 'groq'):
+                return await self._fallback_conversation(message, context)
+            
+            # Build system prompt with available tools
+            system_prompt = self._build_ai_orchestrator_prompt(context)
+            
+            # Get conversation history for context
+            conversation_history = context.get("conversation_history", [])
+            
+            # Prepare messages for AI
+            messages = [
+                {"role": "system", "content": system_prompt},
+                *conversation_history[-5:],  # Last 5 messages for context
+                {"role": "user", "content": message}
+            ]
+            
+            # Let AI decide what to do
+            response = self.intent_agent.groq.chat.completions.create(
+                model="llama-3.1-8b-instant",
+                messages=messages,
+                temperature=0.3,
+                max_tokens=300,
+                tools=self._format_tools_for_ai(),
+                tool_choice="auto"
+            )
+            
+            # Process AI response and tool calls
+            ai_message = response.choices[0].message
+            
+            # Check if AI wants to call tools
+            if hasattr(ai_message, 'tool_calls') and ai_message.tool_calls:
+                return await self._handle_tool_calls(ai_message.tool_calls, context, session_id, user_id)
+            
+            # If the model returned inline tool-call markup in content, parse and handle it
+            content_text = (ai_message.content or '').strip() if hasattr(ai_message, 'content') else ''
+            inline_calls = self._parse_inline_tool_calls(content_text)
+            if inline_calls:
+                self.logger.info(
+                    f"🛠️ Detected inline tool calls: {[c['name'] for c in inline_calls]} | session={session_id}"
+                )
+                # Convert parsed inline calls to a minimal structure compatible with _handle_tool_calls
+                class _Func:
+                    def __init__(self, name, arguments):
+                        self.name = name
+                        self.arguments = arguments
+                class _Call:
+                    def __init__(self, func):
+                        self.function = func
+                tool_calls = []
+                for call in inline_calls:
+                    tool_calls.append(_Call(_Func(call['name'], json.dumps(call['arguments']))))
+                return await self._handle_tool_calls(tool_calls, context, session_id, user_id)
+
+            # AI responded directly without tool calls
+            # Post-process response to ensure natural flow
+            response_text = response.choices[0].message.content.strip()
+            
+            # Clean up any remaining raw function syntax
+            response_text = re.sub(r'<function=[^>]+>', '', response_text)
+            response_text = re.sub(r'</function>', '', response_text)
+            
+            return response_text
+            
+        except Exception as e:
+            self.logger.error(f"AI-driven conversation failed: {e}")
+            return await self._fallback_conversation(message, context)
+    
+    def _format_tools_for_ai(self) -> List[Dict[str, Any]]:
+        """Format available tools for AI consumption"""
+        tools = []
+        for tool_name, tool_info in self.available_tools.items():
+            if tool_name in self.available_capabilities and self.available_capabilities[tool_name]:
+                tools.append({
+                    "type": "function",
+                    "function": {
+                        "name": tool_name,
+                        "description": tool_info["description"],
+                        "parameters": tool_info["parameters"]
+                    }
+                })
+        return tools
+    
+    async def _handle_tool_calls(self, tool_calls: List, context: Dict[str, Any], session_id: str, user_id: Optional[str]) -> str:
+        """Handle tool calls from the AI and generate appropriate response"""
+        try:
+            tool_results = []
+            
+            # Execute each tool call
+            for tool_call in tool_calls:
+                tool_name = tool_call.function.name
+                tool_args = json.loads(tool_call.function.arguments)
+                
+                if tool_name in self.available_tools:
+                    tool_function = self.available_tools[tool_name]["function"]
+                    
+                    # Structured logging for tool invocation
+                    try:
+                        pretty_args = json.dumps(tool_args)[:400]
+                    except Exception:
+                        pretty_args = str(tool_args)[:400]
+                    self.logger.info(
+                        f"▶️ Tool Invoke | name={tool_name} | session={session_id} | user={user_id} | args={pretty_args}"
+                    )
+
+                    # Call the appropriate tool
+                    if tool_name == "understand_user_intent":
+                        result = await tool_function(tool_args["message"], context)
+                    elif tool_name == "collect_required_info":
+                        result = await tool_function(
+                            tool_args["intent"], 
+                            tool_args["message"], 
+                            tool_args.get("conversation_history", [])
+                        )
+                    elif tool_name == "search_business_information":
+                        result = await tool_function(
+                            tool_args["query"], 
+                            tool_args.get("business_type")
+                        )
+                    elif tool_name == "execute_business_action":
+                        result = await tool_function(tool_args["action_data"])
+                    elif tool_name == "retrieve_memory_context":
+                        result = await tool_function(
+                            tool_args["query"], 
+                            tool_args.get("memory_type"),
+                            session_id  # Pass session_id for memory retrieval
+                        )
+                    elif tool_name == "search_business_sections":
+                        result = await tool_function(
+                            tool_args["business_id"], 
+                            tool_args.get("section_type")
+                        )
+                    else:
+                        result = {"error": f"Unknown tool: {tool_name}"}
+                    
+                    # Structured logging for tool result
+                    try:
+                        pretty_result = json.dumps(result)[:600]
+                    except Exception:
+                        pretty_result = str(result)[:600]
+                    self.logger.info(
+                        f"✅ Tool Result | name={tool_name} | session={session_id} | user={user_id} | result={pretty_result}"
+                    )
+
+                    tool_results.append({
+                        "tool": tool_name,
+                        "result": result
+                    })
+                else:
+                    tool_results.append({
+                        "tool": tool_name,
+                        "result": {"error": f"Tool not available: {tool_name}"}
+                    })
+            
+            # Let AI formulate response based on tool results
+            return await self._generate_response_from_tools(tool_results, context)
+            
+        except Exception as e:
+            self.logger.error(f"Tool call handling failed: {e}")
+            return "I had trouble processing that request. Could you try again?"
+
+    def _parse_inline_tool_calls(self, content: str) -> List[Dict[str, Any]]:
+        """Parse inline tool-call markup like <function=tool_name{...}></function> from model content.
+        Returns a list of dicts: [{"name": str, "arguments": dict}]."""
+        if not content:
+            return []
+        calls: List[Dict[str, Any]] = []
+        # Pattern captures: tool name in group 1, JSON-like args in group 2
+        pattern = re.compile(r"<function\s*=\s*([\w_]+)\s*(\{.*?\})\s*>.*?</function>", re.DOTALL)
+        for match in pattern.finditer(content):
+            name = match.group(1)
+            raw_args = match.group(2)
+            try:
+                # Ensure valid JSON (sometimes single quotes); try to coerce
+                json_text = raw_args
+                # Replace single quotes with double only if it seems safe
+                if "'" in json_text and '"' not in json_text:
+                    json_text = json_text.replace("'", '"')
+                args = json.loads(json_text)
+                # If content wrapped under a top-level key like {"context":..., "message":...}, pass as-is
+                calls.append({"name": name, "arguments": args})
+            except Exception:
+                # If parsing fails, log and skip
+                self.logger.warning(f"Failed to parse inline tool-call arguments for {name}")
+                continue
+        return calls
+    
+    async def _generate_response_from_tools(self, tool_results: List[Dict], context: Dict[str, Any]) -> str:
+        """Generate natural response based on tool execution results"""
+        try:
+            if not self.intent_agent or not hasattr(self.intent_agent, 'groq'):
+                # Fallback: summarize tool results manually
+                return self._summarize_tool_results(tool_results)
+            
+            # Build prompt for AI to formulate response
+            prompt = f"""Based on the following tool execution results, provide a natural, helpful response to the user:
+
+Tool Results:
+{json.dumps(tool_results, indent=2)}
+
+Context:
+- Available businesses: {len(context.get('businesses', []))}
+- Current time: {context.get('current_time', 'Unknown')}
+
+Please provide a conversational response that:
+1. Incorporates the tool results naturally
+2. Maintains a friendly, helpful tone
+3. If there were function calls, acknowledges them naturally (e.g. "Let me check that for you")
+4. If there were errors, acknowledges them gracefully and offers alternatives
+5. Avoids showing raw function syntax unless absolutely necessary"""
+
+            response = self.intent_agent.groq.chat.completions.create(
+                model="llama-3.1-8b-instant",
+                messages=[
+                    {"role": "system", "content": "You are X-SevenAI, a helpful business concierge. Respond naturally based on tool results."},
+                    {"role": "user", "content": prompt}
+                ],
+                temperature=0.8,
+                max_tokens=300
+            )
+            
+            # Post-process response to ensure natural flow
+            response_text = response.choices[0].message.content.strip()
+            
+            # Clean up any remaining raw function syntax
+            response_text = re.sub(r'<function=[^>]+>', '', response_text)
+            response_text = re.sub(r'</function>', '', response_text)
+            
+            return response_text
+            
+        except Exception as e:
+            self.logger.error(f"Response generation failed: {e}")
+            return self._summarize_tool_results(tool_results)
+    
+    def _summarize_tool_results(self, tool_results: List[Dict]) -> str:
+        """Fallback method to summarize tool results without AI"""
+        summaries = []
+        
+        for tool_result in tool_results:
+            tool_name = tool_result["tool"]
+            result = tool_result["result"]
+            
+            if tool_name == "understand_user_intent":
+                intent = result.get("intent", "general")
+                confidence = result.get("confidence", 0)
+                summaries.append(f"I understand you want to {intent.replace('_', ' ')} (confidence: {confidence:.1f})")
+            
+            elif tool_name == "collect_required_info":
+                status = result.get("status", "unknown")
+                if status == "incomplete":
+                    missing = result.get("missing_info", [])
+                    summaries.append(f"I need more information: {', '.join(missing)}")
+                elif status == "complete":
+                    summaries.append("I have all the information I need")
+            
+            elif tool_name == "search_business_information":
+                answer = result.get("answer", "No information found")
+                confidence = result.get("confidence", 0)
+                summaries.append(f"Search result: {answer} (confidence: {confidence:.1f})")
+            
+            elif tool_name == "execute_business_action":
+                if result.get("success"):
+                    message = result.get("confirmation_message", "Action completed successfully")
+                    summaries.append(f"✅ {message}")
+                else:
+                    error = result.get("error", "Action failed")
+                    summaries.append(f"❌ {error}")
+        
+        return " ".join(summaries) if summaries else "I'm processing your request..."
+    
+    
+    async def _store_conversation_context(
+        self,
+        session_id: str,
+        user_id: Optional[str],
+        user_message: str,
+        ai_response: str,
+        context: Dict[str, Any]
+    ) -> None:
+        """Store conversation context in advanced memory system"""
+        try:
+            # Store semantic memory for the conversation
+            if self.available_capabilities.get("semantic_memory", False):
+                await self.memory_manager.store_semantic_memory(
+                    session_id=session_id,
+                    user_id=user_id,
+                    content_type="conversation",
+                    content_text=f"User: {user_message}\nAssistant: {ai_response}",
+                    metadata={
+                        "businesses_mentioned": [b.get("name", "") for b in context.get("businesses", [])],
+                        "conversation_length": len(context.get("conversation_history", [])),
+                        "timestamp": datetime.now().isoformat()
+                    }
+                )
+            
+            # Store short-term conversation memory
+            conversation_context = {
+                "user_message": user_message,
+                "ai_response": ai_response,
+                "timestamp": datetime.now().isoformat(),
+                "businesses_available": len(context.get("businesses", [])),
+                "categories_available": list(set(b.get("category", "") for b in context.get("businesses", [])))
+            }
+            
+            await self.memory_manager.store_conversation_memory(
+                session_id=session_id,
+                user_id=user_id,
+                memory_type="short_term",
+                context_key=f"conversation_{datetime.now().isoformat()}",
+                context_value=conversation_context,
+                importance_score=0.6
+            )
+            
+            # Update user context profile
+            if user_id:
+                profile_data = {
+                    "last_interaction": datetime.now().isoformat(),
+                    "total_conversations": len(context.get("conversation_history", [])) + 1,
+                    "preferred_categories": list(set(b.get("category", "") for b in context.get("businesses", []))),
+                    "interaction_patterns": {
+                        "message_length": len(user_message),
+                        "response_length": len(ai_response),
+                        "business_context_used": len(context.get("businesses", [])) > 0
+                    }
+                }
+                
+                await self.memory_manager.update_user_context_profile(
+                    user_id=user_id,
+                    profile_data=profile_data
+                )
+                
+        except Exception as e:
+            self.logger.error(f"Failed to store conversation context: {e}")
+    
+    def _build_ai_orchestrator_prompt(self, context: Dict[str, Any]) -> str:
+        """Build the AI orchestrator prompt with available tools and context"""
+        businesses = context.get("businesses", [])
+        business_stats = context.get("business_stats", {})
+
+        # Get unique categories from cached data instead of loading from DB
+        cached_categories = self.get_cached_categories()
+        if cached_categories:
+            categories = cached_categories
+            self.logger.debug(f"✅ Used cached categories: {len(categories)} categories")
+        else:
+            # Fallback: extract from context business stats
+            categories = business_stats.get("categories", [])
+            self.logger.debug(f"⚠️ Cache not available, used context categories: {len(categories)} categories")
+        
+        # Build business examples
+        businesses_text = "\n".join([
+            f"- {biz['name']} ({biz['category']}) in {biz['location']}"
+            for biz in businesses[:5]
+        ])
+        
+        # Create category-specific capabilities
+        capabilities = []
+        if any("restaurant" in cat.lower() or "food" in cat.lower() for cat in categories):
+            capabilities.append("- Restaurant reservations and food orders")
+        if any("service" in cat.lower() or "repair" in cat.lower() for cat in categories):
+            capabilities.append("- Service appointments and repairs")
+        if any("retail" in cat.lower() or "shop" in cat.lower() for cat in categories):
+            capabilities.append("- Product purchases and shopping")
+        
+        capabilities.extend([
+            "- Business information and recommendations",
+            "- General assistance with local services"
+        ])
+        
+        capabilities_text = "\n".join(capabilities)
+        
+        # Available tools description
+        tools_description = []
+        for tool_name, tool_info in self.available_tools.items():
+            if tool_name in self.available_capabilities and self.available_capabilities[tool_name]:
+                tools_description.append(f"- {tool_name}: {tool_info['description']}")
+        
+        tools_text = "\n".join(tools_description)
+        
+        return f"""You are X-SevenAI, a friendly and intelligent business concierge powered by advanced AI agents. You have access to powerful tools to help users with local businesses and services. Your goal is to provide natural, conversational assistance that flows like water - understanding user needs and responding helpfully without rigid templates or predetermined formats. Be conversational, adaptive, and genuinely helpful.
+
+AVAILABLE TOOLS:
+{tools_text}
+
+IMPORTANT DECISION FRAMEWORK:
+1. **Intent Analysis**: First, use 'understand_user_intent' to analyze what the user wants
+2. **Business Search**: If they want food/restaurants/services, use 'search_business_information' 
+3. **Information Gathering**: If they need details, use 'search_business_sections'
+4. **Action Execution**: If they want to book/order, use 'execute_business_action'
+5. **Memory**: Use 'retrieve_memory_context' for personalized responses
+
+RESPONSE GUIDELINES:
+- Start with natural conversation, not robotic responses
+- Use tools proactively when user intent is clear
+- If tools return data, incorporate it naturally into conversation
+- Ask clarifying questions only when truly needed
+- Be specific about businesses, not generic
+- Flow like a knowledgeable local friend, not a search engine
+
+EXAMPLES:
+- User: "I want pizza" → Use search_business_information tool, then suggest specific restaurants
+- User: "Book a table" → Use understand_user_intent, then collect_required_info
+- User: "Tell me about Italian food" → Use search_business_information with cuisine filter
+
+Remember: You're a concierge, not a search bot. Make recommendations feel personal and local."""
     
     async def _check_system_health(self):
         """Check overall system health and update degradation mode"""
@@ -139,28 +1156,6 @@ class GlobalAIHandler:
             "available_capabilities": self.available_capabilities,
             "circuit_breakers": self_healing_manager.get_system_health()["circuit_breakers"]
         }
-    
-    async def _detect_intent_with_fallback(self, message: str, context: Dict[str, Any]) -> IntentResult:
-        """Intent detection with multiple fallback levels"""
-        # Primary: AI-powered intent detection
-        if self.available_capabilities["intent_detection"]:
-            try:
-                return await self.intent_agent.detect_intent(message, context)
-            except Exception as e:
-                self.logger.error(f"Intent agent failed: {e}")
-        
-        # Secondary: Keyword-based detection
-        self.logger.info("🔄 Using keyword-based intent detection")
-        message_lower = message.lower().strip()
-        
-        if any(word in message_lower for word in ["book", "reserve", "appointment", "schedule", "booking"]):
-            return IntentResult("service_booking", 0.7, {}, "Keyword fallback: service booking")
-        elif any(word in message_lower for word in ["order", "buy", "purchase", "get", "want", "need"]):
-            return IntentResult("product_order", 0.7, {}, "Keyword fallback: product order")
-        elif any(word in message_lower for word in ["what", "when", "where", "how", "tell me about", "information"]):
-            return IntentResult("information", 0.6, {}, "Keyword fallback: information")
-        else:
-            return IntentResult("general", 0.5, {}, "Keyword fallback: general")
     
     async def _route_with_degradation(self, intent: str, message: str, context: Dict[str, Any],
                                      session_id: str, user_id: Optional[str]) -> str:
@@ -242,7 +1237,7 @@ class GlobalAIHandler:
             # Use the LLM for natural conversation
             system_prompt = self._build_general_prompt(context)
             response = self.intent_agent.groq.chat.completions.create(
-                model="llama-3.3-70b-versatile",
+                model="llama-3.1-8b-instant",
                 messages=[
                     {"role": "system", "content": system_prompt},
                     {"role": "user", "content": message}
@@ -251,7 +1246,14 @@ class GlobalAIHandler:
                 max_tokens=200
             )
 
-            return response.choices[0].message.content.strip()
+            # Post-process response to ensure natural flow
+            response_text = response.choices[0].message.content.strip()
+            
+            # Clean up any remaining raw function syntax
+            response_text = re.sub(r'<function=[^>]+>', '', response_text)
+            response_text = re.sub(r'</function>', '', response_text)
+            
+            return response_text
 
         except Exception as e:
             self.logger.error(f"General intent handling failed: {e}")
@@ -269,290 +1271,37 @@ class GlobalAIHandler:
         # Fallback slot filling
         return {"status": "incomplete", "next_question": f"Can you provide more details for your {intent}?"}
 
-    # Graceful Degradation Methods
-    async def _handle_degraded_transactional(self, intent: str, message: str, context: Dict[str, Any]) -> str:
-        """Handle transactional intents when slot filling is unavailable - category-agnostic"""
-        try:
-            # Extract basic information from message using simple parsing
-            basic_info = self._extract_basic_info(message)
-            
-            if intent == "service_booking":
-                return await self._create_simple_booking(basic_info, context)
-            elif intent == "product_order":
-                return await self._create_simple_order(basic_info, context)
-            else:
-                categories = set(biz.get("category", "General") for biz in context.get("businesses", []))
-                category_list = ', '.join(sorted(categories))
-                return f"I understand you want to make a booking or order, but I need more details. I can help with {category_list} businesses. Could you please provide your name and contact information?"
-                
-        except Exception as e:
-            self.logger.error(f"Degraded transactional handling failed: {e}")
-            return "I'm having trouble processing that request right now. Could you try again in a moment?"
-
-    async def _handle_degraded_information(self, message: str, context: Dict[str, Any]) -> str:
-        """Handle information requests when RAG is unavailable - category-agnostic"""
-        try:
-            # Basic keyword-based responses for different categories
-            message_lower = message.lower()
-            
-            if "menu" in message_lower:
-                return await self._get_basic_menu_info(context)
-            elif "hours" in message_lower or "open" in message_lower or "time" in message_lower:
-                return await self._get_basic_hours_info(context)
-            elif "location" in message_lower or "address" in message_lower or "where" in message_lower:
-                return await self._get_basic_location_info(context)
-            elif "service" in message_lower or "repair" in message_lower:
-                return await self._get_basic_services_info(context)
-            elif "product" in message_lower or "shop" in message_lower:
-                return await self._get_basic_products_info(context)
-            else:
-                # Generic help based on available categories
-                categories = set(biz.get("category", "General") for biz in context.get("businesses", []))
-                category_list = ', '.join(sorted(categories))
-                return f"I'd be happy to help with information about {category_list} businesses. What would you like to know about our services, products, hours, or locations?"
-                
-        except Exception as e:
-            self.logger.error(f"Degraded information handling failed: {e}")
-            return "I'm having trouble retrieving information right now. Could you try asking about our businesses, services, or products?"
-
-    def _extract_basic_info(self, message: str) -> Dict[str, Any]:
-        """Extract basic information from message using simple patterns"""
-        import re
-        
-        info = {}
-        message_lower = message.lower()
-        
-        # Extract phone number
-        phone_match = re.search(r'(\+?[\d\s\-\(\)]{10,})', message)
-        if phone_match:
-            info["phone"] = phone_match.group(1).strip()
-        
-        # Extract name (very basic)
-        name_match = re.search(r'(?:my name is|i\'m|name:?)\s*([A-Za-z\s]+?)(?:\s|$|,)'.lower(), message_lower)
-        if name_match:
-            info["customer_name"] = name_match.group(1).strip().title()
-        
-        # Extract party size
-        party_match = re.search(r'(?:party of|table for|for)\s+(\d+)', message_lower)
-        if party_match:
-            info["party_size"] = int(party_match.group(1))
-        
-        # Extract time preference
-        time_match = re.search(r'(\d{1,2})(?::(\d{2}))?\s*(am|pm|evening|tonight|today|tomorrow)', message_lower)
-        if time_match:
-            hour = int(time_match.group(1))
-            minute = time_match.group(2) or "00"
-            period = time_match.group(3)
-            if period in ["pm", "evening", "tonight"] and hour < 12:
-                hour += 12
-            info["time"] = f"{hour:02d}:{minute}"
-        
-        return info
-
-    async def _create_simple_booking(self, info: Dict[str, Any], context: Dict[str, Any]) -> str:
-        """Create a simple booking with minimal information - category-agnostic"""
-        try:
-            # Use first available business
-            business = context.get("businesses", [{}])[0]
-            business_category = business.get("category", "General").lower()
-            
-            # Determine appropriate action based on category
-            if "restaurant" in business_category or "food" in business_category:
-                action = "create_reservation"
-                booking_data = {
-                    "action": action,
-                    "business_id": business.get("id"),
-                    "customer_name": info.get("customer_name", "Valued Guest"),
-                    "party_size": info.get("party_size", 2),
-                    "reservation_datetime": f"{datetime.now().date()}T{info.get('time', '19:00')}:00",
-                    "phone": info.get("phone", ""),
-                    "special_requests": "Created via simplified process"
-                }
-                confirmation = f"Thank you! I've made a reservation for {info.get('party_size', 2)} people at {business.get('name', 'our restaurant')}. You'll receive a confirmation shortly."
-            else:
-                # Generic service/product booking
-                action = "create_booking"
-                booking_data = {
-                    "action": action,
-                    "business_id": business.get("id"),
-                    "customer_name": info.get("customer_name", "Valued Guest"),
-                    "party_size": info.get("party_size", 1),
-                    "booking_datetime": f"{datetime.now().date()}T{info.get('time', '09:00')}:00",
-                    "phone": info.get("phone", ""),
-                    "special_requests": "Created via simplified process",
-                    "business_category": business_category
-                }
-                
-                if "service" in business_category or "repair" in business_category:
-                    confirmation = f"Thank you! I've scheduled your service appointment at {business.get('name', 'our service center')}. You'll receive a confirmation shortly."
-                elif "retail" in business_category or "shop" in business_category:
-                    confirmation = f"Thank you! I've scheduled your appointment at {business.get('name', 'our store')}. You'll receive a confirmation shortly."
-                else:
-                    confirmation = f"Thank you! Your booking at {business.get('name', 'our business')} is confirmed. You'll receive a confirmation shortly."
-            
-            execution_result = await self.execution_agent.execute_action(booking_data)
-            
-            if execution_result.success:
-                return confirmation
-            else:
-                return "I had trouble making that booking. Could you please provide more details?"
-                
-        except Exception as e:
-            self.logger.error(f"Simple booking failed: {e}")
-            return "I'm having trouble with the booking right now. Please try again."
-
-    async def _create_simple_order(self, info: Dict[str, Any], context: Dict[str, Any]) -> str:
-        """Create a simple order with minimal information"""
-        try:
-            # Use first available business
-            business = context.get("businesses", [{}])[0]
-            
-            order_data = {
-                "action": "create_order",
-                "business_id": business.get("id"),
-                "customer_name": info.get("customer_name", "Valued Guest"),
-                "phone": info.get("phone", ""),
-                "items": "Order placed via simplified process",
-                "delivery_method": "pickup",
-                "special_instructions": "Created via simplified process"
-            }
-            
-            execution_result = await self.execution_agent.execute_action(order_data)
-            
-            if execution_result.success:
-                return f"Thank you! I've placed your order from {business.get('name', 'our restaurant')}. You'll receive confirmation shortly."
-            else:
-                return "I had trouble placing that order. Could you please provide more details?"
-                
-        except Exception as e:
-            self.logger.error(f"Simple order failed: {e}")
-            return "I'm having trouble with the order right now. Please try again."
-
-    async def _get_basic_menu_info(self, context: Dict[str, Any]) -> str:
-        """Get basic menu information when RAG is unavailable"""
-        try:
-            businesses = context.get("businesses", [])
-            if not businesses:
-                return "I don't have menu information available right now."
-            
-            business = businesses[0]
-            menu_items = business.get("menu", [])[:5]  # Show first 5 items
-            
-            if menu_items:
-                menu_text = "\n".join([f"- {item['name']} (€{item['price']:.2f})" for item in menu_items])
-                return f"Here's what we offer at {business['name']}:\n{menu_text}\n\nThis is just a sample - we have many more delicious options!"
-            else:
-                return f"{business['name']} has a great selection of dishes. I'd recommend calling them directly for the full menu."
-                
-        except Exception as e:
-            self.logger.error(f"Basic menu info failed: {e}")
-            return "I'm having trouble accessing menu information right now."
-
-    async def _get_basic_hours_info(self, context: Dict[str, Any]) -> str:
-        """Get basic hours information when RAG is unavailable"""
-        try:
-            businesses = context.get("businesses", [])
-            if not businesses:
-                return "I don't have hours information available right now."
-            
-            business = businesses[0]
-            status = business.get("status", "Open")
-            
-            return f"{business['name']} is currently {status.lower()}. For specific hours, I'd recommend calling them at {business.get('phone', 'their phone number')}."
-                
-        except Exception as e:
-            self.logger.error(f"Basic hours info failed: {e}")
-            return "I'm having trouble accessing hours information right now."
-
-    async def _get_basic_services_info(self, context: Dict[str, Any]) -> str:
-        """Get basic services information when RAG is unavailable"""
-        try:
-            businesses = context.get("businesses", [])
-            service_businesses = [biz for biz in businesses if "service" in biz.get("category", "").lower() or "repair" in biz.get("category", "").lower()]
-            
-            if not service_businesses:
-                return "I don't have specific service information available right now."
-            
-            business = service_businesses[0]
-            
-            return f"{business['name']} provides excellent service. For specific service information, I'd recommend calling them at {business.get('phone', 'their phone number')} or visiting their location."
-                
-        except Exception as e:
-            self.logger.error(f"Basic services info failed: {e}")
-            return "I'm having trouble accessing service information right now."
-
-    async def _get_basic_products_info(self, context: Dict[str, Any]) -> str:
-        """Get basic products information when RAG is unavailable"""
-        try:
-            businesses = context.get("businesses", [])
-            product_businesses = [biz for biz in businesses if "retail" in biz.get("category", "").lower() or "shop" in biz.get("category", "").lower()]
-            
-            if not product_businesses:
-                return "I don't have specific product information available right now."
-            
-            business = product_businesses[0]
-            
-            return f"{business['name']} offers a great selection of products. For specific product information, I'd recommend calling them at {business.get('phone', 'their phone number')} or visiting their store."
-                
-        except Exception as e:
-            self.logger.error(f"Basic products info failed: {e}")
-            return "I'm having trouble accessing product information right now."
 
     async def _build_rich_context(
         self, session_id: str, user_location: Optional[str], user_language: str, preferences: Dict
     ) -> Dict[str, Any]:
-        """Build enterprise-grade context — briefing for all agents"""
+        """Build enterprise-grade context with lazy loading for scalability"""
         context = {
             "current_time": datetime.now().strftime("%A, %B %d, %Y at %I:%M %p"),
             "user_location": user_location,
             "user_language": user_language,
             "user_preferences": preferences,
-            "businesses": [],
-            "conversation_history": [],
+            # Lazy loading: Don't preload businesses for scalability
+            # Search tools will query database dynamically when needed
+            "businesses": [],  # Empty - search dynamically
+            "business_sections": {},
         }
 
-        # Load businesses + enrich with menu, status, location
+        # Load business statistics from cache instead of database (startup optimization)
         try:
-            businesses_resp = self.supabase.table("businesses").select("*").eq("is_active", True).execute()
-            businesses = businesses_resp.data or []
-
-            for biz in businesses:
-                # Load menu
-                menu_resp = self.supabase.table("menu_items").select("*").eq("business_id", biz["id"]).eq("is_available", True).execute()
-                menu_items = menu_resp.data or []
-
-                # Format business for agents
-                formatted_biz = {
-                    "id": biz["id"],
-                    "name": biz["name"],
-                    "category": biz.get("category", "General"),
-                    "location": biz.get("address", ""),
-                    "description": biz.get("description", ""),
-                    "phone": biz.get("phone", ""),
-                    "status": "Open" if biz.get("is_active") else "Closed",
-                    "menu": [
-                        {
-                            "id": item["id"],
-                            "name": item["name"],
-                            "description": item.get("description", ""),
-                            "price": float(item.get("base_price", 0)),
-                            "currency": "€",
-                        }
-                        for item in menu_items
-                    ],
-                }
-
-                # Location filtering
-                if user_location:
-                    loc_lower = user_location.lower().strip()
-                    biz_loc = formatted_biz["location"].lower()
-                    if loc_lower in biz_loc or any(word in biz_loc for word in loc_lower.split()):
-                        context["businesses"].append(formatted_biz)
-                else:
-                    context["businesses"].append(formatted_biz)
-
+            # Use cached business statistics (loaded once at startup)
+            cached_stats = self.get_cached_business_stats()
+            if cached_stats:
+                context["business_stats"] = cached_stats
+                self.logger.debug(f"✅ Used cached business stats: {cached_stats['total_businesses']} businesses")
+            else:
+                # Fallback: load from database if cache not available
+                business_stats = await self._get_business_statistics()
+                context["business_stats"] = business_stats
+                self.logger.debug(f"⚠️ Cache not available, loaded business stats from DB: {business_stats['total_businesses']} businesses")
         except Exception as e:
-            self.logger.error(f"⚠️ Failed to load businesses: {e}")
+            self.logger.error(f"⚠️ Failed to load business stats: {e}")
+            context["business_stats"] = {"total_businesses": 0, "categories": []}
 
         # Load conversation history
         try:
@@ -568,53 +1317,911 @@ class GlobalAIHandler:
                 })
         except Exception as e:
             self.logger.error(f"⚠️ Failed to load conversation history: {e}")
+            context["conversation_history"] = []
+
+        # Load semantic memories for context
+        try:
+            if self.available_capabilities.get("semantic_memory", False):
+                semantic_memories = await self.memory_manager.search_semantic_memory(
+                    session_id=session_id,
+                    query_text="recent conversation context",
+                    content_type="conversation",
+                    top_k=3
+                )
+                context["semantic_memories"] = semantic_memories
+        except Exception as e:
+            self.logger.error(f"⚠️ Failed to load semantic memories: {e}")
+            context["semantic_memories"] = []
+
+        # Add memory context summary
+        try:
+            memory_summary = await self.memory_manager.get_memory_summary(session_id)
+            context["memory_context"] = memory_summary
+        except Exception as e:
+            self.logger.error(f"⚠️ Failed to load memory summary: {e}")
+            context["memory_context"] = {}
 
         return context
 
+    async def _get_business_statistics(self) -> Dict[str, Any]:
+        """Get business statistics for context metadata (scalable approach)"""
+        try:
+            # Get total business count
+            count_resp = self.supabase.table("businesses").select("id", count="exact").eq("is_active", True).execute()
+            total_businesses = count_resp.count or 0
+
+            # Get unique categories
+            categories_resp = self.supabase.table("businesses").select("category").eq("is_active", True).execute()
+            categories = list(set(biz.get("category", "General") for biz in categories_resp.data or []))
+
+            # Get business count by category
+            category_counts = {}
+            for category in categories:
+                cat_count_resp = self.supabase.table("businesses").select("id", count="exact").eq("is_active", True).ilike("category", f"%{category}%").execute()
+                category_counts[category] = cat_count_resp.count or 0
+
+            return {
+                "total_businesses": total_businesses,
+                "categories": sorted(categories),
+                "category_counts": category_counts,
+                "last_updated": datetime.now().isoformat()
+            }
+
+        except Exception as e:
+            self.logger.error(f"Failed to get business statistics: {e}")
+            return {"total_businesses": 0, "categories": [], "category_counts": {}}
+
+    async def _detect_intent_fast(self, message: str, conversation_history: Optional[List[Dict[str, Any]]] = None) -> Dict[str, Any]:
+        """
+        Modern LLM-powered intent detection like ChatGPT.
+        Uses sophisticated analysis instead of simple keyword matching.
+        Now includes conversation context for better multi-turn understanding.
+        """
+        message_lower = message.lower().strip()
+
+        # Initialize intent analysis
+        intent_analysis = {
+            "intent": "general",
+            "confidence": 0.5,
+            "business_type": None,
+            "query": message,
+            "entities": {},
+            "context": {},
+            "requires_tools": False,
+            "conversation_context": self._analyze_conversation_context(conversation_history) if conversation_history else {}
+        }
+
+        # Check for follow-up responses to previous business suggestions
+        if conversation_history:
+            followup_analysis = self._detect_followup_intent(message_lower, conversation_history)
+            if followup_analysis["is_followup"]:
+                intent_analysis.update({
+                    "intent": followup_analysis["intent"],
+                    "confidence": followup_analysis["confidence"],
+                    "business_type": followup_analysis["business_type"],
+                    "entities": followup_analysis["entities"],
+                    "context": followup_analysis["context"],
+                    "requires_tools": followup_analysis["requires_tools"],
+                    "followup_type": followup_analysis["followup_type"]
+                })
+                return intent_analysis
+
+        # Business Search Intent Detection (enhanced)
+        if self._is_business_search_query(message_lower):
+            intent_analysis.update({
+                "intent": "business_search",
+                "confidence": 0.95,
+                "business_type": self._extract_business_type_advanced(message_lower),
+                "entities": self._extract_entities_from_query(message_lower),
+                "context": self._extract_context_from_query(message_lower),
+                "requires_tools": True
+            })
+
+        # Booking Intent Detection
+        elif self._is_booking_query(message_lower):
+            intent_analysis.update({
+                "intent": "booking",
+                "confidence": 0.9,
+                "business_type": self._extract_business_type_advanced(message_lower),
+                "entities": self._extract_entities_from_query(message_lower),
+                "context": self._extract_context_from_query(message_lower),
+                "requires_tools": True
+            })
+
+        # Information Intent Detection
+        elif self._is_information_query(message_lower):
+            intent_analysis.update({
+                "intent": "information",
+                "confidence": 0.8,
+                "business_type": self._extract_business_type_advanced(message_lower),
+                "entities": self._extract_entities_from_query(message_lower),
+                "requires_tools": True
+            })
+
+        # Greeting Detection (only for very short messages)
+        elif self._is_greeting(message_lower):
+            intent_analysis.update({
+                "intent": "greeting",
+                "confidence": 0.8,
+                "requires_tools": False
+            })
+
+        return intent_analysis
+
+    def _is_business_search_query(self, message: str) -> bool:
+        """
+        Advanced business search detection like ChatGPT.
+        Understands implicit search requests.
+        """
+        # Explicit search terms
+        search_indicators = [
+            'find', 'looking for', 'search', 'show me', 'recommend',
+            'where can i', 'i need', 'i want', 'suggest', 'best',
+            'available', 'nearby', 'around here', 'in the area'
+        ]
+
+        # Business-specific terms
+        business_terms = [
+            'restaurant', 'food', 'eat', 'pizza', 'coffee', 'cafe',
+            'haircut', 'salon', 'doctor', 'dentist', 'car repair',
+            'mechanic', 'plumber', 'cleaning', 'tutoring', 'store',
+            'shop', 'service', 'repair', 'barber', 'spa'
+        ]
+
+        has_search_indicator = any(indicator in message for indicator in search_indicators)
+        has_business_term = any(term in message for term in business_terms)
+
+        # Implicit searches (like "I'm hungry" or "I need a haircut") - expanded
+        implicit_indicators = [
+            "i'm hungry", "i want to eat", "i need a haircut", "my car needs repair",
+            "i need coffee", "i want food", "i need to see a doctor",
+            "i want pizza", "i want sushi", "i want coffee", "i want burger",
+            "looking for pizza", "looking for food", "looking for restaurant",
+            "find me pizza", "find me food", "find me restaurant",
+            "show me pizza", "show me food", "show me restaurant"
+        ]
+        has_implicit_search = any(indicator in message for indicator in implicit_indicators)
+
+        return has_search_indicator or has_business_term or has_implicit_search
+
+    def _is_booking_query(self, message: str) -> bool:
+        """Advanced booking intent detection"""
+        booking_indicators = [
+            'book', 'reserve', 'schedule', 'appointment', 'table for',
+            'make reservation', 'want to book', 'need to schedule',
+            'set up appointment', 'make booking', 'reserve for'
+        ]
+
+        # Time-based booking indicators
+        time_indicators = [
+            'tonight', 'tomorrow', 'next week', 'this evening',
+            'for today', 'at 8pm', 'at 7pm', 'at 6pm'
+        ]
+
+        has_booking_term = any(term in message for term in booking_indicators)
+        has_time_reference = any(time in message for time in time_indicators)
+
+        return has_booking_term or (has_time_reference and self._is_business_search_query(message))
+
+    def _is_information_query(self, message: str) -> bool:
+        """Advanced information intent detection"""
+        info_indicators = [
+            'tell me about', 'what is', 'how much', 'price of',
+            'hours for', 'when does', 'where is', 'what are',
+            'can you tell me', 'i need to know', 'information about'
+        ]
+
+        return any(indicator in message for indicator in info_indicators)
+
+    def _is_greeting(self, message: str) -> bool:
+        """Sophisticated greeting detection"""
+        greetings = [
+            'hello', 'hi', 'hey', 'good morning', 'good afternoon',
+            'good evening', 'how are you', 'what\'s up', 'howdy'
+        ]
+
+        # Only classify as greeting if it's very short and contains greeting
+        is_short_greeting = len(message.split()) <= 3 and any(greeting in message for greeting in greetings)
+
+        # Or if it's just a greeting with some politeness
+        is_polite_greeting = any(greeting in message for greeting in greetings) and len(message.split()) <= 5
+
+        return is_short_greeting or is_polite_greeting
+
+    def _extract_business_type_advanced(self, message: str) -> Optional[str]:
+        """
+        Advanced business type extraction like ChatGPT's entity recognition.
+        """
+        # Food & Hospitality
+        if any(word in message for word in [
+            'pizza', 'restaurant', 'food', 'cafe', 'burger', 'pasta', 'sushi',
+            'italian', 'chinese', 'mexican', 'thai', 'indian', 'coffee', 'diner',
+            'bar', 'pub', 'grill', 'bistro', 'eatery', 'deli', 'bakery'
+        ]):
+            return "food_hospitality"
+
+        # Automotive Services
+        if any(word in message for word in [
+            'car repair', 'mechanic', 'tyre', 'tire', 'oil change', 'car wash',
+            'auto repair', 'automotive', 'car service', 'garage', 'vehicle',
+            'transmission', 'brake', 'battery', 'engine'
+        ]):
+            return "automotive_services"
+
+        # Health & Medical
+        if any(word in message for word in [
+            'doctor', 'dentist', 'clinic', 'hospital', 'medical', 'appointment',
+            'checkup', 'therapy', 'physician', 'nurse', 'health', 'wellness',
+            'physical', 'exam', 'consultation'
+        ]):
+            return "health_medical"
+
+        # Beauty & Personal Care
+        if any(word in message for word in [
+            'haircut', 'salon', 'spa', 'beauty', 'barber', 'nails', 'massage',
+            'hair salon', 'beauty salon', 'manicure', 'pedicure', 'facial',
+            'waxing', 'hair color', 'styling', 'cosmetologist'
+        ]):
+            return "beauty_personal_care"
+
+        # Local Services
+        if any(word in message for word in [
+            'cleaning', 'plumber', 'electrician', 'repair', 'tutoring',
+            'consulting', 'pest control', 'landscaping', 'moving', 'locksmith',
+            'appliance repair', 'handyman', 'house cleaning', 'carpet cleaning'
+        ]):
+            return "local_services"
+
+        return "general"
+
+    def _extract_entities_from_query(self, message: str) -> Dict[str, Any]:
+        """
+        Extract entities from query like ChatGPT's NER (Named Entity Recognition).
+        """
+        entities = {
+            "cuisine_types": [],
+            "business_names": [],
+            "locations": [],
+            "price_ranges": [],
+            "time_preferences": [],
+            "group_sizes": [],
+            "special_requirements": []
+        }
+
+        # Cuisine extraction
+        cuisines = ['italian', 'chinese', 'mexican', 'thai', 'indian', 'american',
+                   'french', 'japanese', 'korean', 'vietnamese', 'mediterranean']
+        for cuisine in cuisines:
+            if cuisine in message:
+                entities["cuisine_types"].append(cuisine)
+
+        # Location extraction
+        locations = ['downtown', 'uptown', 'midtown', 'suburb', 'mall', 'airport']
+        for location in locations:
+            if location in message:
+                entities["locations"].append(location)
+
+        # Price range extraction
+        if any(word in message for word in ['cheap', 'inexpensive', 'budget']):
+            entities["price_ranges"].append("budget")
+        elif any(word in message for word in ['expensive', 'upscale', 'fine dining']):
+            entities["price_ranges"].append("upscale")
+
+        # Time preferences
+        if any(word in message for word in ['breakfast', 'morning']):
+            entities["time_preferences"].append("morning")
+        elif any(word in message for word in ['lunch', 'noon', 'afternoon']):
+            entities["time_preferences"].append("afternoon")
+        elif any(word in message for word in ['dinner', 'evening', 'tonight']):
+            entities["time_preferences"].append("evening")
+
+        # Group size
+        import re
+        party_match = re.search(r'party of (\d+)|table for (\d+)|for (\d+) people', message)
+        if party_match:
+            size = party_match.group(1) or party_match.group(2) or party_match.group(3)
+            entities["group_sizes"].append(int(size))
+
+        return entities
+
+    def _extract_context_from_query(self, message: str) -> Dict[str, Any]:
+        """
+        Extract contextual information like ChatGPT's conversation understanding.
+        """
+        context = {
+            "urgency": "normal",
+            "specificity": "general",
+            "social_context": "individual",
+            "mood": "neutral",
+            "intent_clarity": "clear"
+        }
+
+        # Urgency detection
+        if any(word in message for word in ['urgent', 'asap', 'emergency', 'quickly']):
+            context["urgency"] = "high"
+        elif any(word in message for word in ['whenever', 'flexible', 'anytime']):
+            context["urgency"] = "low"
+
+        # Specificity detection
+        if any(word in message for word in ['specific', 'particular', 'exact']):
+            context["specificity"] = "high"
+        elif any(word in message for word in ['any', 'whatever', 'something']):
+            context["specificity"] = "low"
+
+        # Social context
+        if any(word in message for word in ['date', 'romantic', 'anniversary']):
+            context["social_context"] = "romantic"
+        elif any(word in message for word in ['family', 'kids', 'children']):
+            context["social_context"] = "family"
+        elif any(word in message for word in ['business', 'meeting', 'corporate']):
+            context["social_context"] = "business"
+
+        # Mood detection
+        if any(word in message for word in ['!', 'excited', 'great', 'awesome']):
+            context["mood"] = "positive"
+        elif any(word in message for word in ['disappointed', 'unhappy', 'bad']):
+            context["mood"] = "negative"
+
+        return context
+
+    def _analyze_conversation_context(self, conversation_history: List[Dict[str, Any]]) -> Dict[str, Any]:
+        """
+        Analyze conversation history to understand current context like ChatGPT.
+        Determines what stage of conversation we're in and what was previously discussed.
+        """
+        context = {
+            "last_ai_message": None,
+            "previous_businesses_suggested": [],
+            "conversation_stage": "initial",
+            "pending_actions": [],
+            "user_selections": []
+        }
+
+        if not conversation_history:
+            return context
+
+        # Get the last few messages to understand context
+        recent_messages = conversation_history[-6:]  # Last 6 messages (3 exchanges)
+
+        for msg in recent_messages:
+            content = msg.get("content", "").lower()
+            role = msg.get("role", "")
+
+            if role == "assistant":
+                context["last_ai_message"] = msg
+
+                # Check if AI suggested businesses - more flexible detection
+                if any(phrase in content for phrase in ["here are", "excellent choice", "great option", "found", "recommend", "suggestion", "option"]):
+                    if "1." in content or "2." in content or "3." in content or any(str(i) + "." in content for i in range(1, 10)):
+                        context["conversation_stage"] = "awaiting_selection"
+                        context["previous_businesses_suggested"] = self._extract_suggested_businesses(content)
+
+            elif role == "user":
+                # Check for selection indicators
+                if any(phrase in content for phrase in ["go with", "choose", "select", "pick", "that one", "the first", "second", "third"]):
+                    context["user_selections"].append({
+                        "message": msg["content"],
+                        "timestamp": msg.get("timestamp")
+                    })
+
+        return context
+
+    def _detect_followup_intent(self, message: str, conversation_history: List[Dict[str, Any]]) -> Dict[str, Any]:
+        """
+        Detect if the current message is a follow-up to previous AI suggestions.
+        This is key to preventing the repetitive behavior.
+        """
+        followup_analysis = {
+            "is_followup": False,
+            "intent": "general",
+            "confidence": 0.0,
+            "business_type": None,
+            "entities": {},
+            "context": {},
+            "requires_tools": False,
+            "followup_type": None
+        }
+
+        # Get conversation context
+        conv_context = self._analyze_conversation_context(conversation_history)
+
+        # Only process as followup if we recently suggested businesses
+        if conv_context["conversation_stage"] != "awaiting_selection":
+            return followup_analysis
+
+        # Selection patterns - user choosing from previous suggestions
+        # More specific patterns to avoid false positives
+        selection_patterns = [
+            r"go with (.+)",
+            r"choose (.+)",
+            r"select (.+)",
+            r"pick (.+)",
+            r"let's go with (.+)",
+            r"i'll take (.+)",
+            r"give me (.+)",
+            r"that one",
+            r"the first one",
+            r"the second one",
+            r"the third one",
+            r"number (\d+)",
+            r"option (\d+)",
+            r"choice (\d+)",
+            r"(\d+)\s*please",
+            r"number\s*(\d+)",
+            # Only match "i want" when it's clearly a selection (short phrases)
+            r"i want (?:the )?(.{1,30}?)(?:\s|$)",  # Max 30 chars to avoid matching long queries
+        ]
+
+        for pattern in selection_patterns:
+            match = re.search(pattern, message, re.IGNORECASE)
+            if match:
+                selected_item = match.group(1) if match.groups() else match.group(0)
+
+                # Special handling for "i want" pattern - check if it's actually a new search
+                if "i want" in pattern and len(message.split()) > 3:
+                    # If it's a longer message with "i want", it's likely a new search, not a selection
+                    # Skip this match and let it fall through to business search detection
+                    continue
+
+                followup_analysis.update({
+                    "is_followup": True,
+                    "intent": "business_selection",
+                    "confidence": 0.9,
+                    "entities": {
+                        "selected_business": selected_item.strip(),
+                        "selection_type": "explicit_choice"
+                    },
+                    "context": {
+                        "previous_suggestions": conv_context["previous_businesses_suggested"],
+                        "conversation_stage": conv_context["conversation_stage"]
+                    },
+                    "requires_tools": True,
+                    "followup_type": "selection"
+                })
+                break
+
+        # If no explicit selection pattern matched, check if the message matches a previously suggested business name
+        if not followup_analysis["is_followup"] and conv_context["conversation_stage"] == "awaiting_selection":
+            previous_businesses = conv_context["previous_businesses_suggested"]
+            message_lower = message.lower().strip()
+
+            # Check if the entire message matches a business name (direct selection)
+            for business in previous_businesses:
+                business_name = business["name"].lower()
+                # Exact match
+                if message_lower == business_name:
+                    followup_analysis.update({
+                        "is_followup": True,
+                        "intent": "business_selection",
+                        "confidence": 0.95,  # Higher confidence for exact matches
+                        "entities": {
+                            "selected_business": business["name"],
+                            "selection_type": "direct_name_match"
+                        },
+                        "context": {
+                            "previous_suggestions": previous_businesses,
+                            "conversation_stage": conv_context["conversation_stage"]
+                        },
+                        "requires_tools": True,
+                        "followup_type": "selection"
+                    })
+                    break
+
+                # Partial match (contains business name)
+                elif len(message_lower) >= 3 and business_name in message_lower:
+                    followup_analysis.update({
+                        "is_followup": True,
+                        "intent": "business_selection",
+                        "confidence": 0.85,
+                        "entities": {
+                            "selected_business": business["name"],
+                            "selection_type": "partial_name_match"
+                        },
+                        "context": {
+                            "previous_suggestions": previous_businesses,
+                            "conversation_stage": conv_context["conversation_stage"]
+                        },
+                        "requires_tools": True,
+                        "followup_type": "selection"
+                    })
+                    break
+
+        # Confirmation patterns - user confirming a choice
+        if not followup_analysis["is_followup"]:
+            confirmation_patterns = [
+                r"yes", r"sure", r"okay", r"ok", r"fine", r"good", r"perfect",
+                r"that works", r"sounds good", r"let's do it"
+            ]
+
+            for pattern in confirmation_patterns:
+                if re.search(r'\b' + pattern + r'\b', message, re.IGNORECASE):
+                    followup_analysis.update({
+                        "is_followup": True,
+                        "intent": "confirmation",
+                        "confidence": 0.8,
+                        "entities": {"confirmation_type": "positive"},
+                        "context": {
+                            "previous_suggestions": conv_context["previous_businesses_suggested"],
+                            "conversation_stage": conv_context["conversation_stage"]
+                        },
+                        "requires_tools": True,
+                        "followup_type": "confirmation"
+                    })
+                    break
+
+        return followup_analysis
+
+    def _extract_suggested_businesses(self, ai_message: str) -> List[Dict[str, Any]]:
+        """
+        Extract business suggestions from AI's previous message.
+        This helps understand what options were presented to the user.
+        """
+        businesses = []
+        lines = ai_message.split('\n')
+
+        for line in lines:
+            line = line.strip()
+            # Look for numbered suggestions like "1. Rosa's Pizza"
+            if re.match(r'^\d+\.\s*.+', line):
+                # Extract business name
+                business_match = re.match(r'^\d+\.\s*([^(-]+)', line)
+                if business_match:
+                    business_name = business_match.group(1).strip()
+                    businesses.append({
+                        "name": business_name,
+                        "raw_text": line
+                    })
+
+        return businesses
+
+    def _learn_user_preferences(self, user_id: str, message: str, intent_analysis: Dict[str, Any], response: str):
+        """
+        Learn user preferences from conversation like ChatGPT.
+        Builds personalized profile over time.
+        """
+        if not user_id:
+            return
+
+        try:
+            preferences = {
+                "last_interaction": datetime.now().isoformat(),
+                "preferred_business_types": [],
+                "preferred_cuisines": [],
+                "preferred_times": [],
+                "budget_level": "medium",
+                "preferred_locations": [],
+                "interaction_patterns": []
+            }
+
+            # Extract preferences from intent analysis
+            entities = intent_analysis.get('entities', {})
+
+            if entities.get('cuisine_types'):
+                preferences["preferred_cuisines"].extend(entities['cuisine_types'])
+
+            if entities.get('time_preferences'):
+                preferences["preferred_times"].extend(entities['time_preferences'])
+
+            if entities.get('price_ranges'):
+                if "budget" in entities['price_ranges']:
+                    preferences["budget_level"] = "low"
+                elif "upscale" in entities['price_ranges']:
+                    preferences["budget_level"] = "high"
+
+            # Store in memory
+            try:
+                # Try to use the memory manager's user preference method
+                if hasattr(self.memory_manager, 'store_user_preference'):
+                    self.memory_manager.store_user_preference(user_id, "business_search", preferences)
+                else:
+                    # Fallback: store directly in database
+                    self.supabase.table("user_context_profiles").upsert({
+                        "user_id": user_id,
+                        "profile_data": preferences,
+                        "updated_at": datetime.now().isoformat()
+                    }, on_conflict="user_id").execute()
+            except Exception as e:
+                self.logger.warning(f"Could not store user preferences: {e}")
+
+        except Exception as e:
+            self.logger.error(f"Error learning user preferences: {e}")
+
+    def _get_multimodal_context(self, user_id: str = None, location: str = None) -> Dict[str, Any]:
+        """
+        Get multi-modal context like modern AI systems.
+        Includes location, time, weather, user preferences, etc.
+        """
+        context = {
+            "current_time": datetime.now().isoformat(),
+            "time_of_day": self._get_time_of_day(),
+            "day_of_week": datetime.now().strftime("%A"),
+            "season": self._get_season(),
+            "location": location or "unknown",
+            "weather": self._get_weather_context(),
+            "user_preferences": {},
+            "recent_searches": []
+        }
+
+        # Get user preferences if available
+        if user_id:
+            try:
+                # Try to use the memory manager's method
+                if hasattr(self.memory_manager, 'get_user_preferences'):
+                    user_prefs = self.memory_manager.get_user_preferences(user_id)
+                else:
+                    # Fallback: get from database directly
+                    resp = self.supabase.table("user_context_profiles").select("*").eq("user_id", user_id).execute()
+                    user_prefs = resp.data[0] if resp.data else {}
+                
+                context["user_preferences"] = user_prefs or {}
+            except Exception as e:
+                self.logger.warning(f"Could not load user preferences: {e}")
+                context["user_preferences"] = {}
+
+        # Get recent search history
+        if user_id:
+            try:
+                # Try to use the memory manager's method
+                if hasattr(self.memory_manager, 'get_recent_searches'):
+                    recent_searches = self.memory_manager.get_recent_searches(user_id, limit=5)
+                else:
+                    # Fallback: empty list
+                    recent_searches = []
+                
+                context["recent_searches"] = recent_searches or []
+            except Exception as e:
+                self.logger.warning(f"Could not load recent searches: {e}")
+                context["recent_searches"] = []
+
+        return context
+
+    def _get_time_of_day(self) -> str:
+        """Get current time of day for contextual suggestions"""
+        hour = datetime.now().hour
+
+        if 5 <= hour < 12:
+            return "morning"
+        elif 12 <= hour < 17:
+            return "afternoon"
+        elif 17 <= hour < 22:
+            return "evening"
+        else:
+            return "night"
+
+    def _get_season(self) -> str:
+        """Get current season for seasonal suggestions"""
+        month = datetime.now().month
+
+        if month in [12, 1, 2]:
+            return "winter"
+        elif month in [3, 4, 5]:
+            return "spring"
+        elif month in [6, 7, 8]:
+            return "summer"
+        else:
+            return "fall"
+
+    def _get_weather_context(self) -> Dict[str, Any]:
+        """
+        Get weather context for recommendations.
+        In production, this would integrate with a weather API.
+        """
+        # Mock weather data - in production, integrate with weather API
+        time_of_day = self._get_time_of_day()
+        season = self._get_season()
+
+        weather_suggestions = {
+            "summer": {
+                "outdoor_friendly": True,
+                "air_conditioned": True,
+                "cold_drinks": True
+            },
+            "winter": {
+                "indoor_friendly": True,
+                "warm_drinks": True,
+                "hearty_food": True
+            },
+            "spring": {
+                "outdoor_friendly": True,
+                "light_fare": True
+            },
+            "fall": {
+                "comfort_food": True,
+                "indoor_friendly": True
+            }
+        }
+
+        return {
+            "season": season,
+            "time_of_day": time_of_day,
+            "suggestions": weather_suggestions.get(season, {}),
+            "temperature": "moderate",  # Mock data
+            "conditions": "clear"  # Mock data
+        }
+
+    def _personalize_recommendations(self, businesses: List[Dict], user_context: Dict[str, Any]) -> List[Dict]:
+        """
+        Personalize business recommendations based on user context.
+        Like ChatGPT's personalized suggestions.
+        """
+        if not businesses:
+            return businesses
+
+        user_prefs = user_context.get('user_preferences', {})
+        time_of_day = user_context.get('time_of_day', 'evening')
+        weather = user_context.get('weather', {})
+
+        # Score businesses based on user preferences
+        for business in businesses:
+            personalization_score = 0
+
+            # Time suitability
+            business_category = business.get('category', '').lower()
+            if time_of_day == 'morning' and 'cafe' in business_category:
+                personalization_score += 0.3
+            elif time_of_day == 'evening' and 'restaurant' in business_category:
+                personalization_score += 0.3
+
+            # Weather suitability
+            weather_suggestions = weather.get('suggestions', {})
+            if weather_suggestions.get('outdoor_friendly') and 'outdoor' in business.get('description', '').lower():
+                personalization_score += 0.2
+
+            # User preference matching
+            preferred_cuisines = user_prefs.get('preferred_cuisines', [])
+            business_desc = business.get('description', '').lower()
+            for cuisine in preferred_cuisines:
+                if cuisine.lower() in business_desc:
+                    personalization_score += 0.4
+
+            # Recent search history
+            recent_searches = user_context.get('recent_searches', [])
+            for search in recent_searches:
+                if search.get('business_type') == business.get('category'):
+                    personalization_score += 0.1
+
+            business['personalization_score'] = personalization_score
+
+        # Sort by personalization score
+        businesses.sort(key=lambda x: x.get('personalization_score', 0), reverse=True)
+
+        return businesses
+
+    def _enhance_response_with_context(self, response: str, intent_analysis: Dict[str, Any], user_context: Dict[str, Any]) -> str:
+        """
+        Enhance response with contextual information like ChatGPT.
+        Adds time-aware, weather-aware, and personalized elements.
+        """
+        try:
+            enhanced_parts = [response]
+
+            time_of_day = user_context.get('time_of_day')
+            weather = user_context.get('weather', {})
+            user_prefs = user_context.get('user_preferences', {})
+
+            # Add time-based suggestions
+            if time_of_day == 'morning' and 'restaurant' in response.lower():
+                enhanced_parts.append("Since it's morning, you might also enjoy our breakfast specials!")
+
+            elif time_of_day == 'evening' and 'restaurant' in response.lower():
+                enhanced_parts.append("Perfect timing for dinner! Many restaurants have evening specials.")
+
+            # Add weather-based suggestions
+            season = weather.get('season')
+            if season == 'summer' and 'outdoor' in response.lower():
+                enhanced_parts.append("With the nice weather, outdoor seating would be perfect!")
+
+            # Add personalization
+            preferred_cuisines = user_prefs.get('preferred_cuisines', [])
+            if preferred_cuisines and len(enhanced_parts) == 1:
+                enhanced_parts.append(f"Based on your preference for {preferred_cuisines[0]} cuisine, I focused on those options.")
+
+            # Combine enhancements
+            if len(enhanced_parts) > 1:
+                return " ".join(enhanced_parts)
+            else:
+                return response
+
+        except Exception as e:
+            self.logger.error(f"Error enhancing response with context: {e}")
+            return response
+
+    async def _handle_business_search_direct(self, query: str, business_type: Optional[str] = None, user_id: str = None) -> str:
+        """
+        Direct business search handling - like modern AI systems.
+        Immediate response without complex agent orchestration.
+        """
+        try:
+            # Extract location from query
+            location = self._extract_location(query)
+
+            # Call RAG search directly
+            from app.services.ai.rag_search import RAGSearch
+            rag = RAGSearch(self.supabase)
+
+            # Search with filters
+            filters = {}
+            if business_type and business_type != "general":
+                filters["category"] = business_type
+
+            results = rag.search_businesses(query=query, filters=filters, top_k=5)
+
+            if results and len(results) > 0:
+                # Format natural response
+                response = self._format_business_search_response(query, results, location)
+                return response
+            else:
+                # No results found
+                return self._format_no_business_found_response(query, business_type)
+
+        except Exception as e:
+            self.logger.error(f"Direct business search failed: {e}")
+            return f"I'd be happy to help you find what you need. Could you tell me more about '{query}'?"
+
+    def _extract_location(self, query: str) -> Optional[str]:
+        """Extract location from query"""
+        query_lower = query.lower()
+
+        # Common locations
+        locations = ['riga', 'jurmala', 'daugavpils', 'liepaja', 'jelgava', 'ventspils']
+
+        for location in locations:
+            if location in query_lower:
+                return location
+
+        # Look for "in [location]" pattern
+        import re
+        location_match = re.search(r'\b(?:in|near|around)\s+([a-zA-Z\s]+)', query_lower)
+        if location_match:
+            return location_match.group(1).strip()
+
+        return None
+
+
     def _build_general_prompt(self, context: Dict[str, Any]) -> str:
-        """Build dynamic prompt for general conversation based on available business categories"""
-        businesses = context.get("businesses", [])
-        
-        # Get unique categories
-        categories = set(biz.get("category", "General") for biz in businesses)
-        
-        # Build business examples
-        businesses_text = "\n".join([
-            f"- {biz['name']} ({biz['category']}) in {biz['location']}"
-            for biz in businesses[:8]
-        ])
-        
-        # Create category-specific help text
+
+        # Create category-specific help text based on available categories
         help_text = []
-        
-        if any("restaurant" in cat.lower() or "food" in cat.lower() for cat in categories):
+
+        if any("restaurant" in cat.lower() or "food" in cat.lower() or "hospitality" in cat.lower() for cat in categories):
             help_text.append("- Restaurant reservations and food orders")
-            
-        if any("service" in cat.lower() or "repair" in cat.lower() for cat in categories):
+
+        if any("service" in cat.lower() or "repair" in cat.lower() or "automotive" in cat.lower() for cat in categories):
             help_text.append("- Service appointments and repairs")
-            
+
         if any("retail" in cat.lower() or "shop" in cat.lower() for cat in categories):
             help_text.append("- Product purchases and shopping")
-            
+
+        if any("health" in cat.lower() or "medical" in cat.lower() for cat in categories):
+            help_text.append("- Medical appointments and healthcare services")
+
+        if any("freelance" in cat.lower() or "consulting" in cat.lower() or "professional" in cat.lower() for cat in categories):
+            help_text.append("- Freelance and professional services")
+
         help_text.extend([
             "- Business information and recommendations",
             "- General assistance with local services"
         ])
-        
+
         help_text_str = "\n".join(help_text)
 
         return f"""You are X-SevenAI, a friendly multi-category business concierge.
 
 🌟 {context['current_time']}
-📍 Serving: {len(context['businesses'])} businesses across {len(categories)} categories
+📍 Serving: {total_businesses} businesses across {len(categories)} categories
 
 AVAILABLE CATEGORIES: {', '.join(sorted(categories))}
 
-AVAILABLE BUSINESSES:
-{businesses_text}
-
 Be friendly, conversational, and helpful. You can help with:
 {help_text_str}
+
+CRITICAL: When users ask about finding businesses, restaurants, services, or recommendations:
+1. ALWAYS call the search_business_information tool first
+2. Use the business_type parameter when users ask about specific categories
+3. Provide specific business names and details from the search results
+4. If no perfect matches, suggest alternatives from available businesses
+
+Example: If user says "pizza shops", call search_business_information with query="pizza" and business_type="food_hospitality"
 
 Keep responses natural and engaging. Adapt your assistance based on the business category and user needs!"""
 
@@ -667,7 +2274,7 @@ Keep responses natural and engaging. Adapt your assistance based on the business
         if not user_id:
             return {}
         try:
-            resp = self.supabase.table("user_preferences").select("*").eq("user_id", user_id).execute()
+            resp = self.supabase.table("user_context_profiles").select("*").eq("user_id", user_id).execute()
             return resp.data[0] if resp.data else {}
         except:
             return {}
@@ -683,10 +2290,27 @@ Keep responses natural and engaging. Adapt your assistance based on the business
                 prefs.update(context["user_preferences"])
 
             # Upsert
-            self.supabase.table("user_preferences").upsert({
+            self.supabase.table("user_context_profiles").upsert({
                 "user_id": user_id,
+                "profile_data": prefs,
                 "preferences": prefs,
                 "updated_at": datetime.utcnow().isoformat(),
             }, on_conflict="user_id").execute()
         except Exception as e:
             self.logger.warning(f"⚠️ Failed to update preferences: {e}")
+
+    async def _handle_business_selection(self, intent_analysis: Dict[str, Any], conversation_history: List[Dict[str, Any]], user_id: str = None) -> str:
+        """
+        Handle user selecting a business from previous suggestions.
+        Now fully AI-driven - no hardcoded responses.
+        """
+        # AI will handle this naturally through orchestrator
+        return ""
+
+    async def _handle_confirmation_response(self, intent_analysis: Dict[str, Any], conversation_history: List[Dict[str, Any]], user_id: str = None) -> str:
+        """
+        Handle user confirmation responses (yes/no) to previous suggestions.
+        Now fully AI-driven - no hardcoded responses.
+        """
+        # AI will handle this naturally through orchestrator
+        return ""

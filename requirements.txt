@@ -31,6 +31,8 @@ langchain-anthropic==0.1.1
 # Vector Database
 qdrant-client==1.7.3
 sentence-transformers==2.3.1
+scikit-learn==1.3.0
+numpy==1.24.3
 
 # Voice Processing
 elevenlabs==0.2.27
