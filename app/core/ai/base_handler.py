@@ -17,6 +17,7 @@ except Exception:  # ImportError or missing dependencies
 
 from app.config.settings import settings
 from app.core.ai.types import RichContext, ChatContext
+from app.core.ai.role_mapper import RoleMapper
 
 
 class BaseAIHandler:
@@ -83,28 +84,36 @@ class BaseAIHandler:
     async def save_conversation(self, context: RichContext, response: str) -> None:
         """Save conversation to database - override as needed"""
         try:
-            from app.models import Message
+            # Use the Supabase client passed via the RichContext (context.db)
+            supabase_client = getattr(context, "db", None)
+            if not supabase_client:
+                self.logger.error("Supabase client not available in context; cannot save conversation.")
+                return
             
-            if self.db:
-                message = Message(
-                    session_id=context.session_id,
-                    business_id=context.business_id,
-                    content=context.user_message,
-                    sender_type="customer",
-                    chat_context=context.chat_context.value
-                )
-                self.db.add(message)
-                
-                response_message = Message(
-                    session_id=context.session_id,
-                    business_id=context.business_id,
-                    content=response,
-                    sender_type="assistant",
-                    chat_context=context.chat_context.value
-                )
-                self.db.add(response_message)
-                self.db.commit()
-                
+            # Prepare payloads for insertion with dynamic role mapping
+            user_msg = {
+                "session_id": context.session_id,
+                "business_id": context.business_id,
+                "content": context.user_message,
+                "sender_type": "customer",  # Always "customer" for user messages
+                "role": "user",  # Required database field - maps customer to user role
+                "chat_context": context.chat_context.value,
+                "created_at": datetime.utcnow().isoformat()
+            }
+            assistant_msg = {
+                "session_id": context.session_id,
+                "business_id": context.business_id,
+                "content": response,
+                "sender_type": "assistant",  # Always "assistant" for AI responses
+                "role": "assistant",  # Required database field - maps assistant to assistant role
+                "chat_context": context.chat_context.value,
+                "created_at": datetime.utcnow().isoformat()
+            }
+            
+            # Insert messages using Supabase API
+            supabase_client.table("messages").insert(user_msg).execute()
+            supabase_client.table("messages").insert(assistant_msg).execute()
+            
         except Exception as e:
             self.logger.error("Failed to save conversation: %s", e)
     

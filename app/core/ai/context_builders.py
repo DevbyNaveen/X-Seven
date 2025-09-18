@@ -8,6 +8,7 @@ from typing import Dict, Any, List, Optional
 
 from app.config.settings import settings
 from app.core.ai.types import RichContext, ChatContext
+from app.core.ai.role_mapper import RoleMapper
 
 logger = logging.getLogger(__name__)
 
@@ -43,7 +44,7 @@ async def build_global_context(context: RichContext) -> RichContext:
                         {
                             "name": item['name'],
                             "description": item['description'],
-                            "price": float(item['base_price'] or 0)
+                            "price": float(item.get('price') or 0)
                         } for item in menu_items
                     ]
                 })
@@ -185,7 +186,7 @@ async def load_conversation_history(
         
         # Scope by chat context
         if chat_context == ChatContext.GLOBAL:
-            query = query.is_('business_id', None)
+            query = query.is_('business_id', 'null')
         elif chat_context in [ChatContext.DEDICATED, ChatContext.DASHBOARD]:
             if business_id:
                 query = query.eq('business_id', business_id)
@@ -197,10 +198,13 @@ async def load_conversation_history(
         
         history = []
         for msg in reversed(messages):
+            # Use dynamic role mapping for flexible sender type handling
+            role = RoleMapper.get_chat_role(msg.get('sender_type', 'customer'))
             history.append({
-                "role": "user" if msg['sender_type'] == "customer" else "assistant",
+                "role": role,
                 "content": msg['content'],
-                "timestamp": msg['created_at'] if msg['created_at'] else None
+                "timestamp": msg['created_at'] if msg['created_at'] else None,
+                "sender_type": msg.get('sender_type', 'unknown')  # Include original type for debugging
             })
         
         return history

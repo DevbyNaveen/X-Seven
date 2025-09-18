@@ -4,7 +4,7 @@ AI services package - Unified Brain Architecture
 
 Exposes the unified AI handler for all chat types.
 """
-from .global_ai_handler import GlobalAIHandler
+from .global_ai import GlobalAIHandler
 from .dedicated_ai_handler import DedicatedAIHandler
 from .dashboard_ai_handler import DashboardAIHandler
 from app.core.ai.types import ChatContext as ChatType
