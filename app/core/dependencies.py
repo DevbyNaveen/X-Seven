@@ -51,7 +51,7 @@ async def get_current_user(
                 )
             
             # Find business by owner email using Supabase
-            business_response = supabase.table("businesses").select("*").eq("contact_info->>email", email).execute()
+            business_response = supabase.table("businesses").select("*").eq("email", email).execute()
             if not business_response.data:
                 raise HTTPException(
                     status_code=status.HTTP_404_NOT_FOUND,
@@ -114,7 +114,7 @@ async def get_current_user_optional(
             if not email:
                 return None
 
-            business_response = supabase.table("businesses").select("*").eq("contact_info->>email", email).execute()
+            business_response = supabase.table("businesses").select("*").eq("email", email).execute()
             if not business_response.data:
                 return None
             
