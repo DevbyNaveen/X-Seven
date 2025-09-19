@@ -39,6 +39,9 @@ class Business(SupabaseModel):
     slug: str
     description: Optional[str] = None
     
+    # Business owner email (for authentication)
+    email: str
+    
     # Business Category
     category: Optional[str] = None
     

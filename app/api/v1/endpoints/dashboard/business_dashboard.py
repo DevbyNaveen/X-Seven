@@ -5,9 +5,11 @@ from fastapi import APIRouter, Depends, HTTPException, status, WebSocket
 
 from app.config.database import get_supabase_client
 from app.core.dependencies import get_current_business, get_current_user
-from app.models import Business, Order, Message, User, OrderStatus
+from app.models import Business, Order, Message, User
+from app.models.order import OrderStatus
 from app.services.websocket.connection_manager import manager
 from app.core.supabase_auth import refresh_jwks_cache
+from app.services.analytics_service import AnalyticsService
 
 router = APIRouter()
 
@@ -62,35 +64,35 @@ async def get_dashboard_overview(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Not authorized to access this business"
         )
-    
+
     # Get today's date
     today = datetime.utcnow().date()
-    
-    # Today's orders
-    today_orders = db.query(Order).filter(
-        Order.business_id == business_id,
-        func.date(Order.created_at) == today
-    ).all()
-    
+    today_start = datetime.combine(today, datetime.min.time()).isoformat()
+    today_end = datetime.combine(today, datetime.max.time()).isoformat()
+
+    # Today's orders using Supabase
+    orders_response = supabase.table('orders').select('*').eq('business_id', business_id).gte('created_at', today_start).lte('created_at', today_end).execute()
+    today_orders = orders_response.data if orders_response.data else []
+
     # Calculate statistics
     total_orders = len(today_orders)
-    total_revenue = sum(order.total_amount for order in today_orders)
-    pending_orders = len([o for o in today_orders if o.status == OrderStatus.PENDING])
-    completed_orders = len([o for o in today_orders if o.status == OrderStatus.COMPLETED])
-    
-    # Active conversations
-    active_conversations = db.query(Message).filter(
-        Message.business_id == business_id,
-        Message.created_at >= datetime.utcnow() - timedelta(hours=1)
-    ).distinct(Message.session_id).count()
-    
-    # Recent orders (last 7 days)
-    seven_days_ago = datetime.utcnow() - timedelta(days=7)
-    recent_orders = db.query(Order).filter(
-        Order.business_id == business_id,
-        Order.created_at >= seven_days_ago
-    ).order_by(Order.created_at.desc()).limit(10).all()
-    
+    total_revenue = sum(order.get('total_amount', 0) for order in today_orders)
+    pending_orders = len([o for o in today_orders if o.get('status') == OrderStatus.PENDING])
+    completed_orders = len([o for o in today_orders if o.get('status') == OrderStatus.DELIVERED])
+
+    # Active conversations using Supabase
+    one_hour_ago = (datetime.utcnow() - timedelta(hours=1)).isoformat()
+    messages_response = supabase.table('messages').select('session_id').eq('business_id', business_id).gte('created_at', one_hour_ago).execute()
+    active_sessions = set()
+    if messages_response.data:
+        active_sessions = {msg['session_id'] for msg in messages_response.data}
+    active_conversations = len(active_sessions)
+
+    # Recent orders (last 7 days) using Supabase
+    seven_days_ago = (datetime.utcnow() - timedelta(days=7)).isoformat()
+    recent_orders_response = supabase.table('orders').select('*').eq('business_id', business_id).gte('created_at', seven_days_ago).order('created_at', desc=True).limit(10).execute()
+    recent_orders = recent_orders_response.data if recent_orders_response.data else []
+
     return {
         "business": {
             "id": current_business.id,
@@ -110,11 +112,11 @@ async def get_dashboard_overview(
         "business_status": "online" if current_business.is_active else "offline",
         "recent_orders": [
             {
-                "id": order.id,
-                "table_id": order.table_id,
-                "total_amount": order.total_amount,
-                "status": order.status,
-                "created_at": order.created_at
+                "id": order.get("id"),
+                "table_id": order.get("table_id"),
+                "total_amount": order.get("total_amount"),
+                "status": order.get("status"),
+                "created_at": order.get("created_at")
             }
             for order in recent_orders
         ]
@@ -126,72 +128,23 @@ async def get_business_stats(
     business_id: int,
     period: str = "7d",  # 1d, 7d, 30d
     current_business: Business = Depends(get_current_business),
-    current_user: User = Depends(get_current_user),
-    supabase = Depends(get_supabase_client)
+    current_user: User = Depends(get_current_user)
 ) -> Any:
-    """Get real-time business statistics."""
+    """Get comprehensive business statistics using analytics service."""
+
     # Verify business access
     if current_business.id != business_id:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Not authorized to access this business"
         )
-    
-    # Determine date range based on period
-    if period == "1d":
-        start_date = datetime.utcnow() - timedelta(days=1)
-    elif period == "30d":
-        start_date = datetime.utcnow() - timedelta(days=30)
-    else:  # Default to 7 days
-        start_date = datetime.utcnow() - timedelta(days=7)
-    
-    # Orders statistics
-    orders = db.query(Order).filter(
-        Order.business_id == business_id,
-        Order.created_at >= start_date
-    ).all()
-    
-    # Group orders by date
-    orders_by_date = {}
-    for order in orders:
-        date_key = order.created_at.date().isoformat()
-        if date_key not in orders_by_date:
-            orders_by_date[date_key] = {"count": 0, "revenue": 0}
-        orders_by_date[date_key]["count"] += 1
-        orders_by_date[date_key]["revenue"] += order.total_amount
-    
-    # Conversation statistics
-    messages = db.query(Message).filter(
-        Message.business_id == business_id,
-        Message.created_at >= start_date
-    ).all()
-    
-    # Group messages by date
-    messages_by_date = {}
-    for message in messages:
-        date_key = message.created_at.date().isoformat()
-        if date_key not in messages_by_date:
-            messages_by_date[date_key] = 0
-        messages_by_date[date_key] += 1
-    
-    # Status distribution
-    status_counts = {}
-    for order in orders:
-        status = order.status
-        if status not in status_counts:
-            status_counts[status] = 0
-        status_counts[status] += 1
-    
-    return {
-        "period": period,
-        "orders_over_time": orders_by_date,
-        "messages_over_time": messages_by_date,
-        "status_distribution": status_counts,
-        "total_orders": len(orders),
-        "total_revenue": sum(order.total_amount for order in orders),
-        "total_messages": len(messages),
-        "average_order_value": sum(order.total_amount for order in orders) / len(orders) if orders else 0
-    }
+
+    # Use the comprehensive analytics service
+    analytics_service = AnalyticsService()
+    return await analytics_service.get_orders_analytics(
+        business_id=business_id,
+        period=period
+    )
 
 
 @router.put("/{business_id}/config", response_model=dict)
@@ -209,31 +162,40 @@ async def update_business_config(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Not authorized to update this business"
         )
-    
-    # Update business configuration
-    # We'll update specific fields based on what's provided
+
+    # Update business configuration using Supabase
     updated_fields = []
-    
+    update_data = {}
+
     if "settings" in config_data:
-        current_business.settings = config_data["settings"]
+        update_data["settings"] = config_data["settings"]
         updated_fields.append("settings")
-    
+
     if "branding_config" in config_data:
-        current_business.branding_config = config_data["branding_config"]
+        update_data["branding_config"] = config_data["branding_config"]
         updated_fields.append("branding_config")
-    
+
     if "contact_info" in config_data:
-        current_business.contact_info = config_data["contact_info"]
+        update_data["contact_info"] = config_data["contact_info"]
         updated_fields.append("contact_info")
-    
+
     if "description" in config_data:
-        current_business.description = config_data["description"]
+        update_data["description"] = config_data["description"]
         updated_fields.append("description")
-    
-    # Commit changes
-    db.commit()
-    db.refresh(current_business)
-    
+
+    # Add updated_at timestamp
+    update_data["updated_at"] = datetime.utcnow().isoformat()
+
+    if update_data:
+        # Update using Supabase
+        update_response = supabase.table('businesses').update(update_data).eq('id', business_id).execute()
+
+        if not update_response.data:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Failed to update business configuration"
+            )
+
     return {
         "status": "success",
         "message": f"Successfully updated {', '.join(updated_fields) if updated_fields else 'no'} fields",
@@ -241,7 +203,7 @@ async def update_business_config(
         "business": {
             "id": current_business.id,
             "name": current_business.name,
-            "updated_at": current_business.updated_at
+            "updated_at": update_data.get("updated_at")
         }
     }
 
@@ -254,24 +216,26 @@ async def get_dashboard_overview(
 ) -> Any:
     """Get dashboard overview statistics."""
     today = datetime.utcnow().date()
+    today_start = datetime.combine(today, datetime.min.time()).isoformat()
+    today_end = datetime.combine(today, datetime.max.time()).isoformat()
 
-    # Today's orders
-    today_orders = db.query(Order).filter(
-        Order.business_id == business.id,
-        func.date(Order.created_at) == today
-    ).all()
+    # Today's orders using Supabase
+    orders_response = supabase.table('orders').select('*').eq('business_id', business.id).gte('created_at', today_start).lte('created_at', today_end).execute()
+    today_orders = orders_response.data if orders_response.data else []
 
     # Calculate statistics
     total_orders = len(today_orders)
-    total_revenue = sum(order.total_amount for order in today_orders)
-    pending_orders = len([o for o in today_orders if o.status == OrderStatus.PENDING])
-    completed_orders = len([o for o in today_orders if o.status == OrderStatus.COMPLETED])
+    total_revenue = sum(order.get('total_amount', 0) for order in today_orders)
+    pending_orders = len([o for o in today_orders if o.get('status') == OrderStatus.PENDING])
+    completed_orders = len([o for o in today_orders if o.get('status') == OrderStatus.DELIVERED])
 
-    # Active conversations
-    active_conversations = db.query(Message).filter(
-        Message.business_id == business.id,
-        Message.created_at >= datetime.utcnow() - timedelta(hours=1)
-    ).distinct(Message.session_id).count()
+    # Active conversations using Supabase
+    one_hour_ago = (datetime.utcnow() - timedelta(hours=1)).isoformat()
+    messages_response = supabase.table('messages').select('session_id').eq('business_id', business.id).gte('created_at', one_hour_ago).execute()
+    active_sessions = set()
+    if messages_response.data:
+        active_sessions = {msg['session_id'] for msg in messages_response.data}
+    active_conversations = len(active_sessions)
 
     return {
         "today": {
@@ -295,36 +259,51 @@ async def get_active_conversations(
 ) -> List[Dict[str, Any]]:
     """Get active customer conversations."""
 
-    # Get recent messages grouped by session
-    subquery = db.query(
-        Message.session_id,
-        func.max(Message.created_at).label('last_message_time')
-    ).filter(
-        Message.business_id == business.id
-    ).group_by(Message.session_id).subquery()
+    # Get recent messages grouped by session using Supabase
+    # We'll get all messages for the business and group them by session_id
+    messages_response = supabase.table('messages').select('*').eq('business_id', business.id).order('created_at', desc=True).limit(limit * 2).execute()
+    messages = messages_response.data if messages_response.data else []
 
-    # Get conversation details
-    conversations = db.query(Message).join(
-        subquery,
-        (Message.session_id == subquery.c.session_id) &
-        (Message.created_at == subquery.c.last_message_time)
-    ).filter(
-        Message.business_id == business.id
-    ).order_by(Message.created_at.desc()).limit(limit).all()
+    # Group messages by session_id and get the latest message for each session
+    sessions = {}
+    for message in messages:
+        session_id = message.get('session_id')
+        if session_id not in sessions:
+            sessions[session_id] = message
+        elif message.get('created_at', '') > sessions[session_id].get('created_at', ''):
+            sessions[session_id] = message
+
+    # Limit to the requested number
+    conversations = list(sessions.values())[:limit]
 
     result = []
     for conv in conversations:
-        # Get message count for this session
-        message_count = db.query(Message).filter(
-            Message.session_id == conv.session_id
-        ).count()
+        session_id = conv.get('session_id')
+
+        # Get message count for this session using Supabase
+        count_response = supabase.table('messages').select('*', count='exact').eq('session_id', session_id).execute()
+        message_count = count_response.count if hasattr(count_response, 'count') else len(count_response.data or [])
+
+        # Calculate time difference
+        created_at = conv.get('created_at')
+        if created_at:
+            # Parse ISO datetime string
+            from datetime import datetime
+            try:
+                msg_time = datetime.fromisoformat(created_at.replace('Z', '+00:00'))
+                time_diff = datetime.utcnow().replace(tzinfo=msg_time.tzinfo) - msg_time
+                is_active = time_diff.seconds < 3600
+            except:
+                is_active = False
+        else:
+            is_active = False
 
         result.append({
-            "session_id": conv.session_id,
-            "last_message": conv.content,
-            "last_message_time": conv.created_at,
+            "session_id": session_id,
+            "last_message": conv.get('content', ''),
+            "last_message_time": created_at,
             "message_count": message_count,
-            "status": "active" if (datetime.utcnow() - conv.created_at).seconds < 3600 else "idle"
+            "status": "active" if is_active else "idle"
         })
 
     return result
@@ -339,13 +318,10 @@ async def takeover_conversation(
 ) -> Any:
     """Take over a conversation from the bot."""
 
-    # Verify session belongs to business
-    message = db.query(Message).filter(
-        Message.session_id == session_id,
-        Message.business_id == business.id
-    ).first()
+    # Verify session belongs to business using Supabase
+    messages_response = supabase.table('messages').select('*').eq('session_id', session_id).eq('business_id', business.id).limit(1).execute()
 
-    if not message:
+    if not messages_response.data:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Conversation not found"
@@ -400,21 +376,20 @@ async def get_live_orders(
         OrderStatus.READY
     ]
 
-    orders = db.query(Order).filter(
-        Order.business_id == business.id,
-        Order.status.in_(active_statuses)
-    ).order_by(Order.created_at.desc()).all()
+    # Query orders using Supabase with status filter
+    orders_response = supabase.table('orders').select('*').eq('business_id', business.id).in_('status', active_statuses).order('created_at', desc=True).execute()
+    orders = orders_response.data if orders_response.data else []
 
     return [
         {
-            "id": order.id,
-            "table_id": order.table_id,
-            "items": order.items,
-            "total": order.total_amount,
-            "status": order.status,
-            "created_at": order.created_at,
-            "estimated_ready": order.estimated_ready_time,
-            "special_instructions": order.special_instructions
+            "id": order.get("id"),
+            "table_id": order.get("table_id"),
+            "items": order.get("items", []),
+            "total": order.get("total_amount", 0),
+            "status": order.get("status"),
+            "created_at": order.get("created_at"),
+            "estimated_ready": order.get("estimated_ready_time"),
+            "special_instructions": order.get("special_instructions")
         }
         for order in orders
     ]
@@ -425,3 +400,217 @@ async def test_refresh_jwks():
     """Test endpoint to manually refresh JWKS cache."""
     success = refresh_jwks_cache()
     return {"success": success, "message": "JWKS cache refreshed" if success else "Failed to refresh JWKS cache"}
+
+
+# Enhanced Analytics Endpoints using Analytics Service
+@router.get("/{business_id}/analytics/overview", response_model=dict)
+async def get_analytics_overview(
+    business_id: int,
+    period: str = "7d",
+    current_business: Business = Depends(get_current_business),
+    current_user: User = Depends(get_current_user)
+) -> Any:
+    """Get comprehensive analytics overview using analytics service."""
+
+    # Verify business access
+    if current_business.id != business_id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Not authorized to access this business analytics"
+        )
+
+    analytics_service = AnalyticsService()
+    return await analytics_service.get_combined_analytics(
+        business_id=business_id,
+        period=period
+    )
+
+
+@router.get("/{business_id}/analytics/realtime", response_model=dict)
+async def get_realtime_analytics(
+    business_id: int,
+    current_business: Business = Depends(get_current_business),
+    current_user: User = Depends(get_current_user)
+) -> Any:
+    """Get real-time analytics for the last hour."""
+
+    # Verify business access
+    if current_business.id != business_id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Not authorized to access this business analytics"
+        )
+
+    analytics_service = AnalyticsService()
+
+    # Get last hour analytics
+    orders_analytics = await analytics_service.get_orders_analytics(business_id, "1d")
+    messages_analytics = await analytics_service.get_messages_analytics(business_id, "1d")
+
+    # Calculate real-time metrics
+    now = datetime.utcnow()
+    one_hour_ago = now - timedelta(hours=1)
+
+    # Filter for last hour only
+    recent_orders = [
+        order for order in orders_analytics["orders"]
+        if order.get('created_at') and
+        datetime.fromisoformat(order['created_at'].replace('Z', '+00:00')) > one_hour_ago
+    ]
+
+    recent_messages = [
+        msg for msg in messages_analytics["messages"]
+        if msg.get('created_at') and
+        datetime.fromisoformat(msg['created_at'].replace('Z', '+00:00')) > one_hour_ago
+    ]
+
+    return {
+        "business_id": business_id,
+        "time_window": "last_hour",
+        "generated_at": now.isoformat(),
+        "orders": {
+            "count": len(recent_orders),
+            "revenue": sum(order.get('total_amount', 0) for order in recent_orders),
+            "orders": recent_orders[:10]  # Last 10 orders
+        },
+        "messages": {
+            "count": len(recent_messages),
+            "active_sessions": len(set(msg.get('session_id') for msg in recent_messages if msg.get('session_id'))),
+            "messages": recent_messages[:20]  # Last 20 messages
+        },
+        "performance": {
+            "orders_per_hour": len(recent_orders),
+            "messages_per_hour": len(recent_messages),
+            "revenue_per_hour": sum(order.get('total_amount', 0) for order in recent_orders)
+        }
+    }
+
+
+@router.get("/{business_id}/analytics/performance", response_model=dict)
+async def get_performance_analytics(
+    business_id: int,
+    period: str = "30d",
+    current_business: Business = Depends(get_current_business),
+    current_user: User = Depends(get_current_user)
+) -> Any:
+    """Get performance analytics with trends and KPIs."""
+
+    # Verify business access
+    if current_business.id != business_id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Not authorized to access this business analytics"
+        )
+
+    analytics_service = AnalyticsService()
+
+    # Get analytics for different periods for comparison
+    current_period = await analytics_service.get_combined_analytics(business_id, period)
+
+    # Calculate previous period for comparison
+    if period == "7d":
+        prev_period = "30d"  # Compare with month
+    elif period == "30d":
+        prev_period = "90d"  # Compare with quarter
+    else:
+        prev_period = "7d"   # Default comparison
+
+    previous_period = await analytics_service.get_combined_analytics(business_id, prev_period)
+
+    # Calculate growth rates
+    def calculate_growth(current, previous):
+        if previous == 0:
+            return 0 if current == 0 else 100
+        return ((current - previous) / previous) * 100
+
+    return {
+        "business_id": business_id,
+        "analysis_period": period,
+        "comparison_period": prev_period,
+        "generated_at": datetime.utcnow().isoformat(),
+        "kpis": {
+            "orders": {
+                "current": current_period["summary"]["total_orders"],
+                "previous": previous_period["summary"]["total_orders"],
+                "growth_rate": calculate_growth(
+                    current_period["summary"]["total_orders"],
+                    previous_period["summary"]["total_orders"]
+                )
+            },
+            "revenue": {
+                "current": current_period["summary"]["total_revenue"],
+                "previous": previous_period["summary"]["total_revenue"],
+                "growth_rate": calculate_growth(
+                    current_period["summary"]["total_revenue"],
+                    previous_period["summary"]["total_revenue"]
+                )
+            },
+            "messages": {
+                "current": current_period["summary"]["total_messages"],
+                "previous": previous_period["summary"]["total_messages"],
+                "growth_rate": calculate_growth(
+                    current_period["summary"]["total_messages"],
+                    previous_period["summary"]["total_messages"]
+                )
+            },
+            "average_order_value": {
+                "current": current_period["summary"]["average_order_value"],
+                "previous": previous_period["summary"]["average_order_value"],
+                "growth_rate": calculate_growth(
+                    current_period["summary"]["average_order_value"],
+                    previous_period["summary"]["average_order_value"]
+                )
+            }
+        },
+        "trends": {
+            "orders_over_time": current_period["orders"]["daily_trends"],
+            "messages_over_time": current_period["messages"]["daily_trends"]
+        },
+        "status_distribution": current_period["orders"]["status_distribution"]
+    }
+
+
+@router.post("/{business_id}/analytics/order", response_model=dict)
+async def create_order_via_analytics(
+    business_id: int,
+    order_data: Dict[str, Any],
+    current_business: Business = Depends(get_current_business),
+    current_user: User = Depends(get_current_user)
+) -> Any:
+    """Create a new order record via analytics service."""
+
+    # Verify business access
+    if current_business.id != business_id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Not authorized to create orders for this business"
+        )
+
+    analytics_service = AnalyticsService()
+    return await analytics_service.create_order_analytics_record(
+        business_id=business_id,
+        order_data=order_data
+    )
+
+
+@router.post("/{business_id}/analytics/message", response_model=dict)
+async def create_message_via_analytics(
+    business_id: int,
+    message_data: Dict[str, Any],
+    current_business: Business = Depends(get_current_business),
+    current_user: User = Depends(get_current_user)
+) -> Any:
+    """Create a new message record via analytics service."""
+
+    # Verify business access
+    if current_business.id != business_id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Not authorized to create messages for this business"
+        )
+
+    analytics_service = AnalyticsService()
+    return await analytics_service.create_message_analytics_record(
+        business_id=business_id,
+        message_data=message_data
+    )

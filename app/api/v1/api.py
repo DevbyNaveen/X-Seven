@@ -6,15 +6,16 @@ from app.api.v1.endpoints import (
     global_endpoints,
     dedicated_endpoints,
     dashboard_endpoints,
-    supabase_auth
+    supabase_auth,
+    analytics_endpoints  # Add analytics endpoints
 )
 from app.api.v1.endpoints.dashboard import business_dashboard as dashboard
 from app.api.v1.endpoints.food import menu as food_menu, order as food_order, table as food_table, inventory as food_inventory, qr as food_qr
 from app.api.v1.endpoints.food.websocket.dashboard_websocket import router as dashboard_ws_router
 from app.api.v1.endpoints.food.websocket.kitchen_websocket import router as kitchen_ws_router
-from app.api.v1.endpoints.AREndpoints.analytics import router as analytics_router
-from app.api.v1.endpoints.AREndpoints.reports import router as reports_router
-from app.api.v1.endpoints.AREndpoints.business_intelligence import router as business_intelligence_router
+# from app.api.v1.endpoints.AREndpoints.analytics import router as analytics_router
+# from app.api.v1.endpoints.AREndpoints.reports import router as reports_router
+# from app.api.v1.endpoints.AREndpoints.business_intelligence import router as business_intelligence_router
 
 # Create main router
 api_router = APIRouter()
@@ -48,6 +49,13 @@ api_router.include_router(
     dashboard_endpoints.router,
     prefix="/dashboard",
     tags=["Dashboard AI"]
+)
+
+# Include our new analytics endpoints
+api_router.include_router(
+    analytics_endpoints.router,
+    prefix="/analytics",
+    tags=["Analytics"]
 )
 
 api_router.include_router(
@@ -95,21 +103,21 @@ api_router.include_router(
     tags=["Food Service - Kitchen WebSocket"]
 )
 
-# Include Analytics and Reporting endpoints
-api_router.include_router(
-    analytics_router,
-    prefix="/are",
-    tags=["Analytics and Reporting"]
-)
+# # Include Analytics and Reporting endpoints
+# api_router.include_router(
+#     analytics_router,
+#     prefix="/are",
+#     tags=["Analytics and Reporting"]
+# )
 
-api_router.include_router(
-    reports_router,
-    prefix="/are",
-    tags=["Analytics and Reporting"]
-)
+# api_router.include_router(
+#     reports_router,
+#     prefix="/are",
+#     tags=["Analytics and Reporting"]
+# )
 
-api_router.include_router(
-    business_intelligence_router,
-    prefix="/are",
-    tags=["Analytics and Reporting"]
-)
+# api_router.include_router(
+#     business_intelligence_router,
+#     prefix="/are",
+#     tags=["Analytics and Reporting"]
+# )

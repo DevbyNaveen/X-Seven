@@ -37,7 +37,7 @@ async def direct_supabase_register(
             )
 
         # Check if business with this email already exists
-        email_business_response = supabase.table("businesses").select("*").eq("contact_info->>email", request.admin_email).execute()
+        email_business_response = supabase.table("businesses").select("*").eq("email", request.admin_email).execute()
         if email_business_response.data:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
@@ -81,7 +81,8 @@ async def direct_supabase_register(
             "subscription_plan": "basic",
             "subscription_status": "trial",
             "is_active": True,
-            "contact_info": {"email": request.admin_email},
+            "contact_info": {},
+            "email": request.admin_email,
             "category": request.business_category.value if request.business_category else None,
             "created_at": datetime.utcnow().isoformat(),
             "updated_at": datetime.utcnow().isoformat()
