@@ -114,7 +114,7 @@ async def get_current_user_optional(
             if not email:
                 return None
 
-            business_response = supabase.table("businesses").select("*").eq("contact_info->>email", email).execute()
+            business_response = supabase.table("businesses").select("*").eq("email", email).execute()
             if not business_response.data:
                 return None
             

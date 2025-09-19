@@ -156,15 +156,15 @@ async def handle_dashboard_action(message: Dict[str, Any], business_id: int, sup
             })
 
 async def process_ai_chat_message(message: Dict[str, Any], business_id: int, supabase) -> Dict[str, Any]:
-    """Process AI chat messages and generate responses using Unified AI Handler."""
-    from app.services.ai import UnifiedAIHandler, ChatType
+    """Process AI chat messages and generate responses using Dashboard AI Handler."""
+    from app.services.ai import DashboardAIHandler
     
     user_message = message.get("message", "")
     session_id = message.get("session_id", "dashboard_default")
     
     try:
-        # Initialize unified AI handler with the provided session
-        ai_handler = UnifiedAIHandler(supabase)
+        # Initialize dashboard AI handler with the provided session
+        ai_handler = DashboardAIHandler(supabase)
         
         # Get recent orders for context
         recent_orders_response = supabase.table('orders').select('*').eq('business_id', business_id).order('created_at', desc=True).limit(5).execute()
@@ -174,12 +174,12 @@ async def process_ai_chat_message(message: Dict[str, Any], business_id: int, sup
         tables_response = supabase.table('tables').select('*').eq('business_id', business_id).execute()
         tables = tables_response.data if tables_response.data else []
         
-        # Process the message through the unified AI handler
+        # Process the message through the dashboard AI handler
         result = await ai_handler.process_message(
             message=user_message,
             session_id=session_id,
-            chat_context=ChatType.DASHBOARD,
             business_id=business_id,
+            user_id=None,  # Optional user_id
             additional_context={
                 "recent_orders": recent_orders,
                 "tables": tables
