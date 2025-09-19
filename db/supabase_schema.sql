@@ -25,6 +25,7 @@ CREATE TABLE IF NOT EXISTS public.businesses (
     settings JSONB,
     branding_config JSONB,
     contact_info JSONB,
+    email TEXT UNIQUE, -- Added for analytics and faster lookups
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
@@ -63,6 +64,7 @@ ALTER TABLE public.menu_items ENABLE ROW LEVEL SECURITY;
 
 -- Create indexes for better performance
 CREATE INDEX IF NOT EXISTS idx_businesses_slug ON public.businesses(slug);
+CREATE INDEX IF NOT EXISTS idx_businesses_email ON public.businesses(email);
 CREATE INDEX IF NOT EXISTS idx_menu_categories_business_id ON public.menu_categories(business_id);
 CREATE INDEX IF NOT EXISTS idx_menu_items_business_id ON public.menu_items(business_id);
 CREATE INDEX IF NOT EXISTS idx_menu_items_category_id ON public.menu_items(category_id);
