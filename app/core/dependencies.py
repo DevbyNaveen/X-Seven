@@ -51,7 +51,7 @@ async def get_current_user(
                 )
             
             # Find business by owner email using Supabase
-            business_response = supabase.table("businesses").select("*").eq("contact_info->>email", email).execute()
+            business_response = supabase.table("businesses").select("*").eq("email", email).execute()
             if not business_response.data:
                 raise HTTPException(
                     status_code=status.HTTP_404_NOT_FOUND,
@@ -144,6 +144,7 @@ async def get_current_business(
     """
     Get the business associated with current user.
     """
+    
     if not current_user.business_id:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,

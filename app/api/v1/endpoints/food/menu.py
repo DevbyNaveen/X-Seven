@@ -106,7 +106,7 @@ async def create_menu_item(
             "category_id": item_data.category_id,
             "image_url": item_data.image_url,
             "is_available": item_data.is_available,
-            "preparation_time": item_data.preparation_time,
+           
             "sort_order": item_data.sort_order
         }
 
