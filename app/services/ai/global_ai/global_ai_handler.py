@@ -6,6 +6,7 @@ from __future__ import annotations
 import json
 import logging
 import re
+import asyncio
 from datetime import datetime
 from typing import Dict, Any, Optional, List
 import threading
@@ -154,8 +155,21 @@ class GlobalAIHandler:
         
         # Graceful degradation state
         self.degradation_mode = False
+        
+        # Track available capabilities (tools)
         self.available_capabilities = self._assess_capabilities()
-    
+        
+        # Define high-level capabilities as categories
+        self._cached_categories = None
+        self._cached_businesses = None
+        self._business_cache_time = None
+        self._cache_lock = asyncio.Lock()
+        
+        # Capability usage stats - track which capabilities are used most frequently
+        self._capability_usage_stats = {capability: 0 for capability in self.get_capability_categories().keys()}
+        
+        self.logger.info(f"👋 Global AI Handler initialized with {len(self.available_tools)} tools and {len(self.get_capability_categories())} high-level capabilities")
+
     def _register_tools(self) -> Dict[str, Dict[str, Any]]:
         """Register all available tools that the AI can call"""
         return {
@@ -441,11 +455,13 @@ class GlobalAIHandler:
         user_preferences: Optional[Dict] = None,
     ) -> Dict[str, Any]:
         """
-        Modern AI-driven chat method with intent-first detection and fast paths
-        Like ChatGPT - immediate responses for common queries, tool orchestration for complex tasks
-{{ ... }}
+        Modern AI-driven chat method with capability-based selection and tool orchestration
+        Uses high-level capabilities to determine appropriate actions and tools
         """
         try:
+            start_time = datetime.utcnow()
+            self.logger.info(f"📣 Chat request received | session={session_id} | user={user_id or 'anonymous'}")
+            
             # Get multimodal context for all conversations
             multimodal_context = self._get_multimodal_context(user_id, user_location)
 
@@ -471,14 +487,35 @@ class GlobalAIHandler:
             # Check system health and update capabilities
             await self._check_system_health()
 
-            # Let LLM decide everything - no hardcoded fast paths
+            # Let AI decide capability and orchestrate tools
+            self.logger.info(f"🧠 AI selecting capability and tools for request | session={session_id}")
             response = await self._ai_driven_conversation(message, context, session_id, user_id)
 
+            # Detect capability from response if possible
+            capability = "unknown"
+            try:
+                # Check for capability indicators in response
+                if "reservation" in response.lower() or "book" in response.lower() or "confirm" in response.lower():
+                    capability = "Reservation/booking"
+                elif "menu" in response.lower() or "businesses" in response.lower() or "located" in response.lower():
+                    capability = "Business discovery"
+                elif "information" in response.lower() or "hours" in response.lower() or "prices" in response.lower():
+                    capability = "Information retrieval"
+                elif "order" in response.lower() or "delivery" in response.lower():
+                    capability = "Order placement"
+                elif "hello" in response.lower() or "welcome" in response.lower() or "hi there" in response.lower():
+                    capability = "Greeting"
+                else:
+                    capability = "General assistance"
+            except Exception:
+                # Default to general if detection fails
+                capability = "General assistance"
+
             # Enhance response with multimodal context
-            response = self._enhance_response_with_context(response, {"intent": "unknown"}, multimodal_context)
+            response = self._enhance_response_with_context(response, {"capability": capability}, multimodal_context)
 
             # Learn from this interaction
-            self._learn_user_preferences(user_id, message, {"intent": "unknown"}, response)
+            self._learn_user_preferences(user_id, message, {"capability": capability}, response)
 
             # Store conversation context in memory
             await self._store_conversation_context(session_id, user_id, message, response, context)
@@ -487,17 +524,22 @@ class GlobalAIHandler:
             await self._save_conversation(session_id, user_id, message, response)
             await self._update_user_preferences(user_id, context, response)
 
+            # Calculate response time
+            processing_time = (datetime.utcnow() - start_time).total_seconds()
+            self.logger.info(f"✅ Chat completed | capability={capability} | time={processing_time:.2f}s | session={session_id}")
+
             return {
                 "message": response,
                 "success": True,
                 "session_id": session_id,
-                "intent_detected": "llm_decided",  # LLM decides intent internally
+                "capability": capability,  # Track which capability was used
                 "fast_path_used": False,
                 "personalized": True,
                 "multimodal_context": multimodal_context,
                 "system_health": self._get_system_status(),
                 "memory_info": await self.memory_manager.get_memory_summary(session_id),
                 "timestamp": datetime.utcnow().isoformat(),
+                "processing_time_seconds": processing_time,
             }
 
         except Exception as e:
@@ -658,58 +700,85 @@ class GlobalAIHandler:
     
     async def _ai_driven_conversation_stream(self, message: str, context: Dict[str, Any], session_id: str, user_id: Optional[str]):
         """
-        Streaming version of AI-driven conversation
-        First executes any tool calls, then streams the final response
+        Streaming version of AI-driven conversation with capability-based approach
+        First determines the high-level capability, then executes tools if needed, then streams response
         """
         try:
             # Check if we have AI capabilities
             if not self.intent_agent or not hasattr(self.intent_agent, 'groq'):
                 # Fallback response
-                fallback_response = await self._fallback_conversation(message, context)
+                fallback_response = await self._handle_general_intent(message, context)
                 for chunk in self._stream_text(fallback_response):
                     yield chunk
                 return
             
-            # Build system prompt
+            # Build system prompt with high-level capabilities and tools
             system_prompt = self._build_ai_orchestrator_prompt(context)
             
             # Get conversation history
             conversation_history = context.get("conversation_history", [])
             
+            # Enhanced user prompt to encourage capability-based thinking
+            enhanced_user_prompt = f"""{message}
+
+First, determine which capability this request falls under, then use appropriate tools if needed."""
+            
             # Prepare messages for AI
             messages = [
                 {"role": "system", "content": system_prompt},
                 *conversation_history[-5:],  # Last 5 messages for context
-                {"role": "user", "content": message}
+                {"role": "user", "content": enhanced_user_prompt}
             ]
             
-            # First, check if AI wants to use tools (non-streaming decision)
+            # First, check if AI wants to use tools based on capability selection
             decision_response = self.intent_agent.groq.chat.completions.create(
                 model="llama-3.1-8b-instant",
                 messages=messages,
                 temperature=0.3,
-                max_tokens=100,  # Small response to check for tool calls
+                max_tokens=150,  # Increased for better capability detection
                 tools=self._format_tools_for_ai(),
                 tool_choice="auto"
             )
             
             ai_message = decision_response.choices[0].message
             
-            # If AI wants to use tools, execute them first (can't stream tool execution)
+            # If AI wants to use tools based on capability selection, execute them first
             if hasattr(ai_message, 'tool_calls') and ai_message.tool_calls:
+                self.logger.info(
+                    f"🎯 AI selected streaming capability requiring tools: {[tc.function.name for tc in ai_message.tool_calls]} | session={session_id}"
+                )
                 tool_results = await self._handle_tool_calls(ai_message.tool_calls, context, session_id, user_id)
                 final_response = tool_results
             else:
-                # No tools needed, AI can respond directly
-                final_response = ai_message.content.strip() if hasattr(ai_message, 'content') and ai_message.content else "I understand your request."
+                # No tools needed, check if content contains any capability selection or JSON
+                content_text = ai_message.content.strip() if hasattr(ai_message, 'content') and ai_message.content else "I understand your request."
+                
+                # Check for JSON action format
+                try:
+                    json_match = re.search(r'\{[\s\S]*?"action"[\s\S]*?\}', content_text)
+                    if json_match:
+                        json_str = json_match.group(0)
+                        action_data = json.loads(json_str)
+                        if 'action' in action_data:
+                            self.logger.info(f"🎯 AI selected streaming capability via JSON: {action_data['action']} | session={session_id}")
+                            # Clean the response
+                            content_text = content_text.replace(json_str, '').strip()
+                except json.JSONDecodeError:
+                    # Not valid JSON, continue
+                    pass
+                    
+                final_response = content_text
             
             # Clean up response
             final_response = re.sub(r'<function=[^>]+>', '', final_response)
             final_response = re.sub(r'</function>', '', final_response)
+            final_response = re.sub(r'\{[\s\S]*?"action"[\s\S]*?\}', '', final_response).strip()
             
             # Store conversation context
             await self._store_conversation_context(session_id, user_id, message, final_response, context)
             await self._save_conversation(session_id, user_id, message, final_response)
+            
+            self.logger.info(f"📝 Streaming response generated | length={len(final_response)} | session={session_id}")
             
             # Now stream the final response
             for chunk in self._stream_text(final_response):
@@ -717,39 +786,44 @@ class GlobalAIHandler:
                 
         except Exception as e:
             self.logger.error(f"Streaming AI-driven conversation failed: {e}")
-            fallback_response = await self._fallback_conversation(message, context)
+            fallback_response = await self._handle_general_intent(message, context)
             for chunk in self._stream_text(fallback_response):
                 yield chunk
     
     async def _ai_driven_conversation(self, message: str, context: Dict[str, Any], session_id: str, user_id: Optional[str]) -> str:
         """
-        AI-driven conversation where the LLM decides when to use each agent/tool
-        No more automatic chaining - the AI orchestrates based on conversation needs
+        AI-driven conversation where the LLM decides which capabilities and tools to use
+        based on high-level capabilities and natural conversation flow
         """
         try:
             # Check if we have AI capabilities
             if not self.intent_agent or not hasattr(self.intent_agent, 'groq'):
-                return await self._fallback_conversation(message, context)
+                return await self._handle_general_intent(message, context)
             
-            # Build system prompt with available tools
+            # Build system prompt with high-level capabilities and available tools
             system_prompt = self._build_ai_orchestrator_prompt(context)
             
             # Get conversation history for context
             conversation_history = context.get("conversation_history", [])
             
+            # Enhanced user prompt to encourage capability-based thinking
+            enhanced_user_prompt = f"""{message}
+
+First, determine which capability this request falls under, then use appropriate tools if needed."""
+            
             # Prepare messages for AI
             messages = [
                 {"role": "system", "content": system_prompt},
                 *conversation_history[-5:],  # Last 5 messages for context
-                {"role": "user", "content": message}
+                {"role": "user", "content": enhanced_user_prompt}
             ]
             
-            # Let AI decide what to do
+            # Let AI decide what capabilities and tools to use
             response = self.intent_agent.groq.chat.completions.create(
                 model="llama-3.1-8b-instant",
                 messages=messages,
                 temperature=0.3,
-                max_tokens=300,
+                max_tokens=500,  # Increased for more comprehensive responses
                 tools=self._format_tools_for_ai(),
                 tool_choice="auto"
             )
@@ -759,10 +833,30 @@ class GlobalAIHandler:
             
             # Check if AI wants to call tools
             if hasattr(ai_message, 'tool_calls') and ai_message.tool_calls:
+                self.logger.info(
+                    f"🎯 AI selected capability requiring tools: {[tc.function.name for tc in ai_message.tool_calls]} | session={session_id}"
+                )
                 return await self._handle_tool_calls(ai_message.tool_calls, context, session_id, user_id)
             
             # If the model returned inline tool-call markup in content, parse and handle it
             content_text = (ai_message.content or '').strip() if hasattr(ai_message, 'content') else ''
+            
+            # Check for JSON action format first
+            try:
+                # Look for JSON blocks that might contain capability info
+                json_match = re.search(r'\{[\s\S]*?"action"[\s\S]*?\}', content_text)
+                if json_match:
+                    json_str = json_match.group(0)
+                    action_data = json.loads(json_str)
+                    if 'action' in action_data:
+                        self.logger.info(f"🎯 AI selected capability via JSON: {action_data['action']} | session={session_id}")
+                        # Clean the response by removing the JSON block
+                        content_text = content_text.replace(json_str, '').strip()
+            except json.JSONDecodeError:
+                # Not valid JSON, continue with regular processing
+                pass
+            
+            # Check for inline tool calls
             inline_calls = self._parse_inline_tool_calls(content_text)
             if inline_calls:
                 self.logger.info(
@@ -789,11 +883,15 @@ class GlobalAIHandler:
             response_text = re.sub(r'<function=[^>]+>', '', response_text)
             response_text = re.sub(r'</function>', '', response_text)
             
+            # Remove any JSON blocks that might have been included
+            response_text = re.sub(r'\{[\s\S]*?"action"[\s\S]*?\}', '', response_text).strip()
+            
+            self.logger.info(f"🗣️ AI selected capability that didn't require tools | session={session_id}")
             return response_text
             
         except Exception as e:
             self.logger.error(f"AI-driven conversation failed: {e}")
-            return await self._fallback_conversation(message, context)
+            return await self._handle_general_intent(message, context)
     
     def _format_tools_for_ai(self) -> List[Dict[str, Any]]:
         """Format available tools for AI consumption"""
@@ -915,14 +1013,39 @@ class GlobalAIHandler:
         return calls
     
     async def _generate_response_from_tools(self, tool_results: List[Dict], context: Dict[str, Any]) -> str:
-        """Generate natural response based on tool execution results"""
+        """Generate natural response based on capability selection and tool execution results"""
         try:
             if not self.intent_agent or not hasattr(self.intent_agent, 'groq'):
                 # Fallback: summarize tool results manually
                 return self._summarize_tool_results(tool_results)
             
-            # Build prompt for AI to formulate response
+            # Determine which high-level capability was likely used based on tool names
+            capability = "unknown"
+            tool_names = [result.get("tool") for result in tool_results]
+            
+            if "understand_user_intent" in tool_names:
+                if "collect_required_info" in tool_names and "execute_business_action" in tool_names:
+                    capability = "Reservation/booking"
+                elif "search_business_information" in tool_names:
+                    capability = "Business discovery"
+                else:
+                    capability = "Information retrieval"
+            elif "search_business_information" in tool_names:
+                capability = "Business discovery"
+            elif "search_business_sections" in tool_names:
+                capability = "Information retrieval"
+            elif "execute_business_action" in tool_names:
+                capability = "Reservation/booking"
+            elif "retrieve_memory_context" in tool_names:
+                capability = "Personalized response"
+            
+            # Log capability used with tool results
+            self.logger.info(f"🔍 Generating response for capability: {capability} with {len(tool_results)} tool results")
+            
+            # Build prompt for AI to formulate response based on capability and tool results
             prompt = f"""Based on the following tool execution results, provide a natural, helpful response to the user:
+
+Detected capability: {capability}
 
 Tool Results:
 {json.dumps(tool_results, indent=2)}
@@ -930,30 +1053,37 @@ Tool Results:
 Context:
 - Available businesses: {len(context.get('businesses', []))}
 - Current time: {context.get('current_time', 'Unknown')}
+- User conversation history: {len(context.get('conversation_history', []))} messages
 
 Please provide a conversational response that:
-1. Incorporates the tool results naturally
-2. Maintains a friendly, helpful tone
-3. If there were function calls, acknowledges them naturally (e.g. "Let me check that for you")
-4. If there were errors, acknowledges them gracefully and offers alternatives
-5. Avoids showing raw function syntax unless absolutely necessary"""
+1. Addresses the user's request based on the detected capability
+2. Incorporates the tool results in a natural, conversational way
+3. Maintains a friendly, helpful tone like a knowledgeable local concierge
+4. Avoids technical terms like "tool", "function", or "capability"
+5. If there were errors, acknowledges them gracefully and offers alternatives
+6. For business discovery, mentions specific business names when available
+7. For reservations, confirms details clearly and provides confirmation info
+8. For information retrieval, presents facts in an organized, readable way
+
+Your response should flow naturally like a human concierge would speak."""
 
             response = self.intent_agent.groq.chat.completions.create(
                 model="llama-3.1-8b-instant",
                 messages=[
-                    {"role": "system", "content": "You are X-SevenAI, a helpful business concierge. Respond naturally based on tool results."},
+                    {"role": "system", "content": "You are X-SevenAI, a helpful business concierge. Respond naturally based on capability selection and tool results."},
                     {"role": "user", "content": prompt}
                 ],
-                temperature=0.8,
-                max_tokens=300
+                temperature=0.7,
+                max_tokens=400  # Increased for more comprehensive responses
             )
             
             # Post-process response to ensure natural flow
             response_text = response.choices[0].message.content.strip()
             
-            # Clean up any remaining raw function syntax
+            # Clean up any remaining raw function syntax or JSON
             response_text = re.sub(r'<function=[^>]+>', '', response_text)
             response_text = re.sub(r'</function>', '', response_text)
+            response_text = re.sub(r'\{[\s\S]*?"action"[\s\S]*?\}', '', response_text).strip()
             
             return response_text
             
@@ -1061,6 +1191,19 @@ Please provide a conversational response that:
         except Exception as e:
             self.logger.error(f"Failed to store conversation context: {e}")
     
+    def get_capability_categories(self) -> Dict[str, str]:
+        """Get available capability categories with descriptions"""
+        return {
+            "Greeting": "Welcome users and respond to greetings appropriately",
+            "Casual conversation": "Engage in friendly chit-chat with users",
+            "Business discovery": "Help users find businesses matching their needs",
+            "Information retrieval": "Answer questions about business details, menus, hours, etc.",
+            "Reservation/booking": "Help users book tables, appointments, or services",
+            "Order placement": "Help users place orders for food, products, or services",
+            "Cancellation/modification": "Help users cancel or change existing bookings/orders",
+            "Answer FAQs": "Provide answers to common questions about businesses or services"
+        }
+    
     def _build_ai_orchestrator_prompt(self, context: Dict[str, Any]) -> str:
         """Build the AI orchestrator prompt with available tools and context"""
         businesses = context.get("businesses", [])
@@ -1082,22 +1225,13 @@ Please provide a conversational response that:
             for biz in businesses[:5]
         ])
         
-        # Create category-specific capabilities
-        capabilities = []
-        if any("restaurant" in cat.lower() or "food" in cat.lower() for cat in categories):
-            capabilities.append("- Restaurant reservations and food orders")
-        if any("service" in cat.lower() or "repair" in cat.lower() for cat in categories):
-            capabilities.append("- Service appointments and repairs")
-        if any("retail" in cat.lower() or "shop" in cat.lower() for cat in categories):
-            capabilities.append("- Product purchases and shopping")
+        # Define high-level capability categories for AI
+        capability_categories_dict = self.get_capability_categories()
         
-        capabilities.extend([
-            "- Business information and recommendations",
-            "- General assistance with local services"
-        ])
-        
-        capabilities_text = "\n".join(capabilities)
-        
+        capability_text = "HIGH-LEVEL CAPABILITIES:\n"
+        for i, (capability, description) in enumerate(capability_categories_dict.items(), 1):
+            capability_text += f"{i}. {capability} - {description}\n"
+
         # Available tools description
         tools_description = []
         for tool_name, tool_info in self.available_tools.items():
@@ -1108,30 +1242,33 @@ Please provide a conversational response that:
         
         return f"""You are X-SevenAI, a friendly and intelligent business concierge powered by advanced AI agents. You have access to powerful tools to help users with local businesses and services. Your goal is to provide natural, conversational assistance that flows like water - understanding user needs and responding helpfully without rigid templates or predetermined formats. Be conversational, adaptive, and genuinely helpful.
 
+{capability_text}
+
 AVAILABLE TOOLS:
 {tools_text}
 
-IMPORTANT DECISION FRAMEWORK:
-1. **Intent Analysis**: First, use 'understand_user_intent' to analyze what the user wants
-2. **Business Search**: If they want food/restaurants/services, use 'search_business_information' 
-3. **Information Gathering**: If they need details, use 'search_business_sections'
-4. **Action Execution**: If they want to book/order, use 'execute_business_action'
-5. **Memory**: Use 'retrieve_memory_context' for personalized responses
+DECISION FRAMEWORK:
+1. First, determine which high-level capability is needed based on the user's request
+2. For business discovery → use 'search_business_information' tool
+3. For information retrieval → use 'search_business_sections' tool
+4. For reservations/orders → use 'understand_user_intent' then 'collect_required_info' then 'execute_business_action'
+5. For personalization → use 'retrieve_memory_context' tool
 
 RESPONSE GUIDELINES:
-- Start with natural conversation, not robotic responses
-- Use tools proactively when user intent is clear
-- If tools return data, incorporate it naturally into conversation
-- Ask clarifying questions only when truly needed
-- Be specific about businesses, not generic
-- Flow like a knowledgeable local friend, not a search engine
+- Be natural and conversational - like a helpful local friend
+- Dynamically choose which capabilities to use based on context
+- Sometimes multiple capabilities may be needed (e.g., greeting + reservation)
+- Ask for missing information when needed (e.g., time, party size)
+- Be specific about businesses rather than generic
+- Return structured information when executing actions
 
 EXAMPLES:
-- User: "I want pizza" → Use search_business_information tool, then suggest specific restaurants
-- User: "Book a table" → Use understand_user_intent, then collect_required_info
-- User: "Tell me about Italian food" → Use search_business_information with cuisine filter
+- User: "I want pizza" → Capability: Business discovery → Use search_business_information tool
+- User: "Book a table" → Capability: Reservation → Use understand_user_intent, collect_required_info
+- User: "Tell me about Italian food" → Capability: Information retrieval → Use search_business_information
 
-Remember: You're a concierge, not a search bot. Make recommendations feel personal and local."""
+Always adapt to the conversation flow naturally. Use the most appropriate capability for each request."""
+
     
     async def _check_system_health(self):
         """Check overall system health and update degradation mode"""

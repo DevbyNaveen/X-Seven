@@ -1,16 +1,28 @@
 """Table schemas for API validation."""
 from typing import Optional
-from pydantic import BaseModel 
+from pydantic import BaseModel, Field, field_validator
 from app.schemas.base import BaseSchema, TimestampSchema, IDSchema
 from app.models.table import TableStatus
 
 
 class TableBase(BaseSchema):
     """Base table fields."""
-    table_number: str
-    capacity: int = 4
-    section: Optional[str] = None
-    location_notes: Optional[str] = None
+    table_number: str = Field(..., min_length=1, max_length=20, description="Table identifier (e.g., 'A1', '5', 'VIP-1')")
+    capacity: int = Field(4, gt=0, le=50, description="Maximum number of seats (1-50)")
+    section: Optional[str] = Field(None, max_length=50, description="Section or area name")
+    location_notes: Optional[str] = Field(None, max_length=200, description="Additional location details")
+    
+    @field_validator('table_number')
+    @classmethod
+    def validate_table_number(cls, v):
+        """Ensure table number doesn't contain invalid characters."""
+        if not v.strip():
+            raise ValueError('Table number cannot be empty')
+        # Allow alphanumeric, hyphens, and spaces
+        import re
+        if not re.match(r'^[A-Za-z0-9\s\-]+$', v):
+            raise ValueError('Table number can only contain letters, numbers, spaces, and hyphens')
+        return v.strip()
 
 
 class TableCreate(TableBase):
@@ -18,13 +30,49 @@ class TableCreate(TableBase):
     pass
 
 
+class TableCreateWithQR(TableBase):
+    """Create new table with QR code generation."""
+    generate_qr: bool = Field(False, description="Automatically generate QR code for the table")
+    qr_size: int = Field(256, ge=64, le=2048, description="QR code size in pixels")
+    qr_color: str = Field("#000000", description="QR code color")
+    qr_background_color: str = Field("#FFFFFF", description="QR code background color")
+    
+    @field_validator('qr_color', 'qr_background_color')
+    @classmethod
+    def validate_qr_hex_color(cls, v):
+        """Validate hex color format for QR codes."""
+        if not v.startswith('#'):
+            raise ValueError('QR color must be in hex format (e.g., #000000)')
+        if len(v) != 7:
+            raise ValueError('QR color must be 7 characters long (e.g., #000000)')
+        try:
+            int(v[1:], 16)
+        except ValueError:
+            raise ValueError('Invalid hex color format')
+        return v
+
+
 class TableUpdate(BaseSchema):
     """Update table fields."""
-    table_number: Optional[str] = None
-    capacity: Optional[int] = None
-    section: Optional[str] = None
-    location_notes: Optional[str] = None
+    table_number: Optional[str] = Field(None, min_length=1, max_length=20)
+    capacity: Optional[int] = Field(None, gt=0, le=50)
+    section: Optional[str] = Field(None, max_length=50)
+    location_notes: Optional[str] = Field(None, max_length=200)
     status: Optional[TableStatus] = None
+    
+    @field_validator('table_number')
+    @classmethod
+    def validate_table_number(cls, v):
+        """Ensure table number doesn't contain invalid characters."""
+        if v is not None:
+            if not v.strip():
+                raise ValueError('Table number cannot be empty')
+            # Allow alphanumeric, hyphens, and spaces
+            import re
+            if not re.match(r'^[A-Za-z0-9\s\-]+$', v):
+                raise ValueError('Table number can only contain letters, numbers, spaces, and hyphens')
+            return v.strip()
+        return v
 
 
 class TableResponse(TableBase, IDSchema, TimestampSchema):

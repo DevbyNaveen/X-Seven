@@ -1,6 +1,6 @@
 """QR code generation schemas."""
 from typing import Optional, List, Dict, Any
-from pydantic import BaseModel
+from pydantic import BaseModel, Field, field_validator
 from datetime import datetime
 from app.schemas.base import BaseSchema, TimestampSchema, IDSchema
 from enum import Enum
@@ -18,14 +18,45 @@ class QRCodeType(str, Enum):
 class QRCodeCreate(BaseSchema):
     """Create a new QR code."""
     type: QRCodeType
-    table_id: Optional[int] = None
-    order_id: Optional[int] = None
-    custom_data: Optional[str] = None
-    size: int = 256
-    color: str = "#000000"
-    background_color: str = "#FFFFFF"
-    logo_url: Optional[str] = None
-    error_correction: str = "M"  # L, M, Q, H
+    table_id: Optional[int] = Field(None, gt=0, description="Table ID for table QR codes")
+    order_id: Optional[int] = Field(None, gt=0, description="Order ID for order QR codes")
+    custom_data: Optional[str] = Field(None, max_length=1000, description="Custom data for custom QR codes")
+    size: int = Field(256, ge=64, le=2048, description="QR code size in pixels (64-2048)")
+    color: str = Field("#000000", description="QR code color (hex format)")
+    background_color: str = Field("#FFFFFF", description="Background color (hex format)")
+    logo_url: Optional[str] = Field(None, max_length=500, description="Logo URL")
+    error_correction: str = Field("M", description="Error correction level")
+    
+    @field_validator('color', 'background_color')
+    @classmethod
+    def validate_hex_color(cls, v):
+        """Validate hex color format."""
+        if not v.startswith('#'):
+            raise ValueError('Color must be in hex format (e.g., #000000)')
+        if len(v) != 7:
+            raise ValueError('Color must be 7 characters long (e.g., #000000)')
+        try:
+            int(v[1:], 16)
+        except ValueError:
+            raise ValueError('Invalid hex color format')
+        return v
+    
+    @field_validator('error_correction')
+    @classmethod
+    def validate_error_correction(cls, v):
+        """Validate error correction level."""
+        if v not in ['L', 'M', 'Q', 'H']:
+            raise ValueError('Error correction must be L, M, Q, or H')
+        return v
+    
+    @field_validator('table_id')
+    @classmethod
+    def validate_table_id_for_type(cls, v, info):
+        """Ensure table_id is provided for table QR codes."""
+        qr_type = info.data.get('type')
+        if qr_type == QRCodeType.TABLE and v is None:
+            raise ValueError('table_id is required for table QR codes')
+        return v
 
 
 class QRCodeResponse(BaseSchema):
