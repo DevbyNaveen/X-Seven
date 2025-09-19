@@ -1,7 +1,8 @@
 """Menu management endpoints for food businesses."""
-from typing import List, Optional
+from typing import List, Optional, Dict, Any, Union, Tuple
 from fastapi import APIRouter, Depends, HTTPException, status, Query
 from pydantic import BaseModel
+from sqlalchemy import func
 from app.config.database import get_supabase_client
 from app.core.dependencies import get_current_business, get_current_user
 from app.models import Business, User, MenuItem, MenuCategory
@@ -11,30 +12,22 @@ router = APIRouter()
 class MenuItemCreate(BaseModel):
     name: str
     description: Optional[str] = None
-    base_price: float
-    category_id: int
+    price: float
+    category_id: str  # UUID as string
     image_url: Optional[str] = None
     is_available: bool = True
     preparation_time: Optional[int] = None
-    dietary_tags: Optional[List[str]] = []
-    allergens: Optional[List[str]] = []
-    calories: Optional[int] = None
-    customizations: Optional[List[dict]] = []
-    stock_quantity: Optional[int] = 0
+    sort_order: int = 0
 
 class MenuItemUpdate(BaseModel):
     name: Optional[str] = None
     description: Optional[str] = None
-    base_price: Optional[float] = None
-    category_id: Optional[int] = None
+    price: Optional[float] = None
+    category_id: Optional[str] = None  # UUID as string
     image_url: Optional[str] = None
     is_available: Optional[bool] = None
     preparation_time: Optional[int] = None
-    dietary_tags: Optional[List[str]] = None
-    allergens: Optional[List[str]] = None
-    calories: Optional[int] = None
-    customizations: Optional[List[dict]] = None
-    stock_quantity: Optional[int] = None
+    sort_order: Optional[int] = None
 
 class MenuItemAvailabilityUpdate(BaseModel):
     is_available: bool
@@ -49,7 +42,7 @@ class MenuCategoryUpdate(BaseModel):
 
 @router.get("/items", response_model=List[dict])
 async def get_menu_items(
-    category_id: Optional[int] = Query(None, description="Filter by category ID"),
+    category_id: Optional[str] = Query(None, description="Filter by category ID"),
     is_available: Optional[bool] = Query(None, description="Filter by availability"),
     search: Optional[str] = Query(None, description="Search by name or description"),
     current_business: Business = Depends(get_current_business),
@@ -57,44 +50,34 @@ async def get_menu_items(
     supabase = Depends(get_supabase_client)
 ) -> List[dict]:
     """Get all menu items with filtering options."""
-    query = db.query(MenuItem).filter(MenuItem.business_id == current_business.id)
-    
-    if category_id is not None:
-        query = query.filter(MenuItem.category_id == category_id)
-    
-    if is_available is not None:
-        query = query.filter(MenuItem.is_available == is_available)
-    
-    if search:
-        search_filter = f"%{search}%"
-        query = query.filter(
-            func.lower(MenuItem.name).contains(func.lower(search_filter)) |
-            func.lower(MenuItem.description).contains(func.lower(search_filter))
+    try:
+        # Start building the query
+        query = supabase.table("menu_items").select("*").eq("business_id", str(current_business.id))
+
+        # Apply filters
+        if category_id is not None:
+            query = query.eq("category_id", category_id)
+
+        if is_available is not None:
+            query = query.eq("is_available", is_available)
+
+        if search:
+            # Use ilike for case-insensitive search
+            query = query.or_(f"name.ilike.%{search}%,description.ilike.%{search}%")
+
+        # Execute query and order by created_at desc
+        response = query.order("created_at", desc=True).execute()
+
+        if response.data:
+            return response.data
+        else:
+            return []
+
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to fetch menu items: {str(e)}"
         )
-    
-    items = query.order_by(MenuItem.created_at.desc()).all()
-    
-    return [
-        {
-            "id": item.id,
-            "name": item.name,
-            "description": item.description,
-            "base_price": item.base_price,
-            "category_id": item.category_id,
-            "image_url": item.image_url,
-            "is_available": item.is_available,
-            "preparation_time": item.preparation_time,
-            "dietary_tags": item.dietary_tags,
-            "allergens": item.allergens,
-            "calories": item.calories,
-            "customizations": item.customizations,
-            "stock_quantity": item.stock_quantity,
-            "display_order": item.display_order,
-            "created_at": item.created_at,
-            "updated_at": item.updated_at
-        }
-        for item in items
-    ]
 
 @router.post("/items", response_model=dict, status_code=status.HTTP_201_CREATED)
 async def create_menu_item(
@@ -104,126 +87,130 @@ async def create_menu_item(
     supabase = Depends(get_supabase_client)
 ) -> dict:
     """Create a new menu item."""
-    # Verify category exists for this business
-    category = db.query(MenuCategory).filter(
-        MenuCategory.id == item_data.category_id,
-        MenuCategory.business_id == current_business.id
-    ).first()
-    
-    if not category:
+    try:
+        # Verify category exists for this business
+        category_response = supabase.table("menu_categories").select("id").eq("id", item_data.category_id).eq("business_id", str(current_business.id)).execute()
+
+        if not category_response.data:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Category not found for this business"
+            )
+
+        # Prepare data for insertion
+        menu_item_data = {
+            "business_id": str(current_business.id),
+            "name": item_data.name,
+            "description": item_data.description,
+            "price": item_data.price,
+            "category_id": item_data.category_id,
+            "image_url": item_data.image_url,
+            "is_available": item_data.is_available,
+            "preparation_time": item_data.preparation_time,
+            "sort_order": item_data.sort_order
+        }
+
+        # Insert the menu item
+        response = supabase.table("menu_items").insert(menu_item_data).execute()
+
+        if response.data:
+            return response.data[0]
+        else:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Failed to create menu item"
+            )
+
+    except HTTPException:
+        raise
+    except Exception as e:
         raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Category not found for this business"
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to create menu item: {str(e)}"
         )
-    
-    # Create menu item
-    menu_item = MenuItem(
-        business_id=current_business.id,
-        name=item_data.name,
-        description=item_data.description,
-        base_price=item_data.base_price,
-        category_id=item_data.category_id,
-        image_url=item_data.image_url,
-        is_available=item_data.is_available,
-        preparation_time=item_data.preparation_time,
-        dietary_tags=item_data.dietary_tags or [],
-        allergens=item_data.allergens or [],
-        calories=item_data.calories,
-        customizations=item_data.customizations or [],
-        stock_quantity=item_data.stock_quantity or 0
-    )
-    
-    db.add(menu_item)
-    db.commit()
-    db.refresh(menu_item)
-    
-    return {
-        "id": menu_item.id,
-        "name": menu_item.name,
-        "description": menu_item.description,
-        "price": menu_item.price,
-        "category_id": menu_item.category_id,
-        "image_url": menu_item.image_url,
-        "is_available": menu_item.is_available,
-        "preparation_time": menu_item.preparation_time,
-        "created_at": menu_item.created_at
-    }
 
 @router.put("/items/{item_id}", response_model=dict)
 async def update_menu_item(
-    item_id: int,
+    item_id: str,  # UUID as string
     item_data: MenuItemUpdate,
     current_business: Business = Depends(get_current_business),
     current_user: User = Depends(get_current_user),
     supabase = Depends(get_supabase_client)
 ) -> dict:
     """Update a menu item (price, availability, etc.)."""
-    # Find menu item for this business
-    menu_item = db.query(MenuItem).filter(
-        MenuItem.id == item_id,
-        MenuItem.business_id == current_business.id
-    ).first()
-    
-    if not menu_item:
+    try:
+        # Verify menu item exists and belongs to this business
+        existing_item = supabase.table("menu_items").select("*").eq("id", item_id).eq("business_id", str(current_business.id)).execute()
+
+        if not existing_item.data:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Menu item not found"
+            )
+
+        # Prepare update data
+        update_data = {}
+        for field in ["name", "description", "price", "category_id", "image_url", "is_available", "preparation_time", "sort_order"]:
+            value = getattr(item_data, field)
+            if value is not None:
+                update_data[field] = value
+
+        if not update_data:
+            # Return existing item if no updates
+            return existing_item.data[0]
+
+        # Update the menu item
+        response = supabase.table("menu_items").update(update_data).eq("id", item_id).eq("business_id", str(current_business.id)).execute()
+
+        if response.data:
+            return response.data[0]
+        else:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Failed to update menu item"
+            )
+
+    except HTTPException:
+        raise
+    except Exception as e:
         raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Menu item not found"
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to update menu item: {str(e)}"
         )
-    
-    # Update fields if provided
-    update_data = item_data.dict(exclude_unset=True)
-    for field, value in update_data.items():
-        setattr(menu_item, field, value)
-    
-    menu_item.updated_at = func.now()
-    db.commit()
-    db.refresh(menu_item)
-    
-    return {
-        "id": menu_item.id,
-        "name": menu_item.name,
-        "description": menu_item.description,
-        "base_price": menu_item.base_price,
-        "category_id": menu_item.category_id,
-        "image_url": menu_item.image_url,
-        "is_available": menu_item.is_available,
-        "preparation_time": menu_item.preparation_time,
-        "dietary_tags": menu_item.dietary_tags,
-        "allergens": menu_item.allergens,
-        "calories": menu_item.calories,
-        "customizations": menu_item.customizations,
-        "stock_quantity": menu_item.stock_quantity,
-        "display_order": menu_item.display_order,
-        "updated_at": menu_item.updated_at
-    }
 
 @router.delete("/items/{item_id}", response_model=dict)
 async def delete_menu_item(
-    item_id: int,
+    item_id: str,  # UUID as string
     current_business: Business = Depends(get_current_business),
     current_user: User = Depends(get_current_user),
     supabase = Depends(get_supabase_client)
 ) -> dict:
     """Remove a menu item."""
-    # Find menu item for this business
-    menu_item = db.query(MenuItem).filter(
-        MenuItem.id == item_id,
-        MenuItem.business_id == current_business.id
-    ).first()
-    
-    if not menu_item:
+    try:
+        # Verify menu item exists and belongs to this business
+        existing_item = supabase.table("menu_items").select("id").eq("id", item_id).eq("business_id", str(current_business.id)).execute()
+
+        if not existing_item.data:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Menu item not found"
+            )
+
+        # Delete the menu item
+        response = supabase.table("menu_items").delete().eq("id", item_id).eq("business_id", str(current_business.id)).execute()
+
+        return {
+            "status": "success",
+            "message": "Menu item deleted successfully"
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
         raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Menu item not found"
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to delete menu item: {str(e)}"
         )
-    
-    db.delete(menu_item)
-    db.commit()
-    
-    return {
-        "status": "success",
-        "message": "Menu item deleted successfully"
-    }
 
 @router.get("/categories", response_model=List[dict])
 async def get_menu_categories(
@@ -232,20 +219,19 @@ async def get_menu_categories(
     supabase = Depends(get_supabase_client)
 ) -> List[dict]:
     """Get all menu categories for the business."""
-    categories = db.query(MenuCategory).filter(
-        MenuCategory.business_id == current_business.id
-    ).order_by(MenuCategory.created_at.desc()).all()
-    
-    return [
-        {
-            "id": category.id,
-            "name": category.name,
-            "description": category.description,
-            "created_at": category.created_at,
-            "updated_at": category.updated_at
-        }
-        for category in categories
-    ]
+    try:
+        response = supabase.table("menu_categories").select("*").eq("business_id", str(current_business.id)).order("created_at", desc=True).execute()
+
+        if response.data:
+            return response.data
+        else:
+            return []
+
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to fetch menu categories: {str(e)}"
+        )
 
 @router.post("/categories", response_model=dict, status_code=status.HTTP_201_CREATED)
 async def create_menu_category(
@@ -255,141 +241,171 @@ async def create_menu_category(
     supabase = Depends(get_supabase_client)
 ) -> dict:
     """Create a new menu category."""
-    # Check if category with same name already exists for this business
-    existing_category = db.query(MenuCategory).filter(
-        MenuCategory.name == category_data.name,
-        MenuCategory.business_id == current_business.id
-    ).first()
-    
-    if existing_category:
+    try:
+        # Check if category with same name already exists for this business
+        existing_response = supabase.table("menu_categories").select("id").eq("name", category_data.name).eq("business_id", str(current_business.id)).execute()
+
+        if existing_response.data:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Category with this name already exists"
+            )
+
+        # Prepare data for insertion
+        category_data_dict = {
+            "business_id": str(current_business.id),
+            "name": category_data.name,
+            "description": category_data.description,
+            "sort_order": 0,
+            "is_active": True
+        }
+
+        # Insert the category
+        response = supabase.table("menu_categories").insert(category_data_dict).execute()
+
+        if response.data:
+            return response.data[0]
+        else:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Failed to create menu category"
+            )
+
+    except HTTPException:
+        raise
+    except Exception as e:
         raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Category with this name already exists"
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to create menu category: {str(e)}"
         )
-    
-    # Create category
-    category = MenuCategory(
-        business_id=current_business.id,
-        name=category_data.name,
-        description=category_data.description
-    )
-    
-    db.add(category)
-    db.commit()
-    db.refresh(category)
-    
-    return {
-        "id": category.id,
-        "name": category.name,
-        "description": category.description,
-        "created_at": category.created_at
-    }
 
 @router.put("/categories/{category_id}", response_model=dict)
 async def update_menu_category(
-    category_id: int,
+    category_id: str,  # UUID as string
     category_data: MenuCategoryUpdate,
     current_business: Business = Depends(get_current_business),
     current_user: User = Depends(get_current_user),
     supabase = Depends(get_supabase_client)
 ) -> dict:
     """Update a menu category."""
-    # Find category for this business
-    category = db.query(MenuCategory).filter(
-        MenuCategory.id == category_id,
-        MenuCategory.business_id == current_business.id
-    ).first()
-    
-    if not category:
+    try:
+        # Verify category exists and belongs to this business
+        existing_category = supabase.table("menu_categories").select("*").eq("id", category_id).eq("business_id", str(current_business.id)).execute()
+
+        if not existing_category.data:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Category not found"
+            )
+
+        # Prepare update data
+        update_data = {}
+        for field in ["name", "description"]:
+            value = getattr(category_data, field)
+            if value is not None:
+                update_data[field] = value
+
+        if not update_data:
+            # Return existing category if no updates
+            return existing_category.data[0]
+
+        # Update the category
+        response = supabase.table("menu_categories").update(update_data).eq("id", category_id).eq("business_id", str(current_business.id)).execute()
+
+        if response.data:
+            return response.data[0]
+        else:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Failed to update menu category"
+            )
+
+    except HTTPException:
+        raise
+    except Exception as e:
         raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Category not found"
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to update menu category: {str(e)}"
         )
-    
-    # Update fields if provided
-    update_data = category_data.dict(exclude_unset=True)
-    for field, value in update_data.items():
-        setattr(category, field, value)
-    
-    category.updated_at = func.now()
-    db.commit()
-    db.refresh(category)
-    
-    return {
-        "id": category.id,
-        "name": category.name,
-        "description": category.description,
-        "updated_at": category.updated_at
-    }
 
 @router.delete("/categories/{category_id}", response_model=dict)
 async def delete_menu_category(
-    category_id: int,
+    category_id: str,  # UUID as string
     current_business: Business = Depends(get_current_business),
     current_user: User = Depends(get_current_user),
     supabase = Depends(get_supabase_client)
 ) -> dict:
     """Delete a menu category."""
-    # Find category for this business
-    category = db.query(MenuCategory).filter(
-        MenuCategory.id == category_id,
-        MenuCategory.business_id == current_business.id
-    ).first()
-    
-    if not category:
+    try:
+        # Verify category exists and belongs to this business
+        existing_category = supabase.table("menu_categories").select("*").eq("id", category_id).eq("business_id", str(current_business.id)).execute()
+
+        if not existing_category.data:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Category not found"
+            )
+
+        # Check if there are menu items in this category
+        items_count_response = supabase.table("menu_items").select("id", count="exact").eq("category_id", category_id).execute()
+
+        if items_count_response.count and items_count_response.count > 0:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Cannot delete category with existing menu items"
+            )
+
+        # Delete the category
+        response = supabase.table("menu_categories").delete().eq("id", category_id).eq("business_id", str(current_business.id)).execute()
+
+        return {
+            "status": "success",
+            "message": "Category deleted successfully"
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
         raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Category not found"
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to delete menu category: {str(e)}"
         )
-    
-    # Check if there are menu items in this category
-    items_count = db.query(MenuItem).filter(
-        MenuItem.category_id == category_id
-    ).count()
-    
-    if items_count > 0:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Cannot delete category with existing menu items"
-        )
-    
-    db.delete(category)
-    db.commit()
-    
-    return {
-        "status": "success",
-        "message": "Category deleted successfully"
-    }
 
 @router.put("/items/{item_id}/availability", response_model=dict)
 async def toggle_item_availability(
-    item_id: int,
+    item_id: str,  # UUID as string
     availability_data: MenuItemAvailabilityUpdate,
     current_business: Business = Depends(get_current_business),
     current_user: User = Depends(get_current_user),
     supabase = Depends(get_supabase_client)
 ) -> dict:
     """Toggle item availability."""
-    # Find menu item for this business
-    menu_item = db.query(MenuItem).filter(
-        MenuItem.id == item_id,
-        MenuItem.business_id == current_business.id
-    ).first()
-    
-    if not menu_item:
+    try:
+        # Verify menu item exists and belongs to this business
+        existing_item = supabase.table("menu_items").select("*").eq("id", item_id).eq("business_id", str(current_business.id)).execute()
+
+        if not existing_item.data:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Menu item not found"
+            )
+
+        # Update availability
+        update_data = {"is_available": availability_data.is_available}
+        response = supabase.table("menu_items").update(update_data).eq("id", item_id).eq("business_id", str(current_business.id)).execute()
+
+        if response.data:
+            return response.data[0]
+        else:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Failed to update item availability"
+            )
+
+    except HTTPException:
+        raise
+    except Exception as e:
         raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Menu item not found"
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to toggle item availability: {str(e)}"
         )
-    
-    menu_item.is_available = availability_data.is_available
-    menu_item.updated_at = func.now()
-    db.commit()
-    db.refresh(menu_item)
-    
-    return {
-        "id": menu_item.id,
-        "name": menu_item.name,
-        "is_available": menu_item.is_available,
-        "updated_at": menu_item.updated_at
-    }

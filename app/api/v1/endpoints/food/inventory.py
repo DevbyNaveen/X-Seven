@@ -2,13 +2,11 @@
 from typing import Any, List, Optional, Dict
 from datetime import datetime, timedelta
 from fastapi import APIRouter, Depends, HTTPException, status, Query
-from sqlalchemy.orm import Session
-from sqlalchemy import and_, func
-from pydantic import BaseModel
+from pydantic import BaseModel, Field, field_validator
 
 from app.config.database import get_supabase_client
 from app.core.dependencies import get_current_business, get_current_user
-from app.models import Business, User, MenuItem, Order
+from app.models import Business, User
 from app.services.websocket.connection_manager import manager
 
 router = APIRouter()
@@ -27,8 +25,8 @@ class InventoryItem(BaseModel):
 
 class InventoryUpdate(BaseModel):
     """Inventory update request."""
-    stock_quantity: int
-    min_stock_threshold: Optional[int] = None
+    stock_quantity: int = Field(..., ge=0, description="New stock quantity (must be >= 0)")
+    min_stock_threshold: Optional[int] = Field(None, ge=0, description="Minimum stock threshold (must be >= 0)")
 
 
 class LowStockItem(BaseModel):
@@ -42,10 +40,18 @@ class LowStockItem(BaseModel):
 
 class ReorderRequest(BaseModel):
     """Reorder request."""
-    item_id: int
-    quantity: int
-    supplier: Optional[str] = None
-    notes: Optional[str] = None
+    item_id: int = Field(..., gt=0, description="Menu item ID (must be > 0)")
+    quantity: int = Field(..., gt=0, le=10000, description="Reorder quantity (1-10000)")
+    supplier: Optional[str] = Field(None, max_length=100, description="Supplier name")
+    notes: Optional[str] = Field(None, max_length=500, description="Additional notes")
+    
+    @field_validator('quantity')
+    @classmethod
+    def validate_quantity(cls, v):
+        """Ensure reorder quantity is reasonable."""
+        if v > 10000:
+            raise ValueError('Reorder quantity cannot exceed 10,000 units')
+        return v
 
 
 class UsageTracking(BaseModel):
@@ -75,39 +81,41 @@ async def get_food_inventory(
     Get inventory with stock levels for food service.
     """
     try:
-        query = db.query(MenuItem).filter(
-            MenuItem.business_id == business.id
-        )
+        query = supabase.table('menu_items').select('*').eq('business_id', business.id)
         
         if low_stock_only:
-            query = query.filter(
-                MenuItem.stock_quantity <= MenuItem.min_stock_threshold
-            )
+            query = query.filter('stock_quantity', 'lte', 'min_stock_threshold')
         
         if category_id:
-            query = query.filter(MenuItem.category_id == category_id)
+            query = query.eq('category_id', category_id)
         
-        menu_items = query.all()
+        response = query.execute()
+        
+        if not response.data:
+            return []
         
         inventory_items = []
-        for item in menu_items:
-            is_low_stock = item.stock_quantity <= item.min_stock_threshold
-            is_out_of_stock = item.stock_quantity == 0
+        for item in response.data:
+            is_low_stock = item['stock_quantity'] <= item['min_stock_threshold']
+            is_out_of_stock = item['stock_quantity'] == 0
             
             inventory_items.append(InventoryItem(
-                id=item.id,
-                name=item.name,
-                current_stock=item.stock_quantity,
-                min_threshold=item.min_stock_threshold,
+                id=item['id'],
+                name=item['name'],
+                current_stock=item['stock_quantity'],
+                min_threshold=item['min_stock_threshold'],
                 is_low_stock=is_low_stock,
                 is_out_of_stock=is_out_of_stock,
-                last_updated=item.updated_at.isoformat() if item.updated_at else None
+                last_updated=item.get('updated_at')
             ))
         
         return inventory_items
         
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to get inventory: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to get inventory: {str(e)}"
+        )
 
 
 @router.put("/items/{item_id}", response_model=InventoryItem)
@@ -121,59 +129,77 @@ async def update_food_inventory(
     Update stock quantity for a menu item.
     """
     try:
-        menu_item = db.query(MenuItem).filter(
-            MenuItem.id == item_id,
-            MenuItem.business_id == business.id
-        ).first()
+        # Get current menu item
+        item_response = supabase.table('menu_items').select('*').eq('id', item_id).eq('business_id', business.id).execute()
         
-        if not menu_item:
-            raise HTTPException(status_code=404, detail="Menu item not found")
+        if not item_response.data:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Menu item not found"
+            )
         
-        # Update stock quantity
-        old_stock = menu_item.stock_quantity
-        menu_item.stock_quantity = update_data.stock_quantity
+        item = item_response.data[0]
+        old_stock = item['stock_quantity']
         
-        # Update threshold if provided
+        # Prepare update data
+        update_dict = {
+            'stock_quantity': update_data.stock_quantity,
+            'updated_at': datetime.utcnow().isoformat()
+        }
+        
         if update_data.min_stock_threshold is not None:
-            menu_item.min_stock_threshold = update_data.min_stock_threshold
+            update_dict['min_stock_threshold'] = update_data.min_stock_threshold
         
-        # Check if item should be marked as unavailable
+        # Update availability based on stock
         if update_data.stock_quantity == 0:
-            menu_item.is_available = False
+            update_dict['is_available'] = False
         elif old_stock == 0 and update_data.stock_quantity > 0:
-            menu_item.is_available = True
+            update_dict['is_available'] = True
         
-        db.commit()
-        db.refresh(menu_item)
+        # Update item
+        update_response = supabase.table('menu_items').update(update_dict).eq('id', item_id).eq('business_id', business.id).execute()
+        
+        if not update_response.data:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Failed to update inventory item"
+            )
+        
+        updated_item = update_response.data[0]
         
         # Check if stock is now low and send alert
-        if (menu_item.stock_quantity <= menu_item.min_stock_threshold and 
-            old_stock > menu_item.min_stock_threshold):
+        if (updated_item['stock_quantity'] <= updated_item['min_stock_threshold'] and 
+            old_stock > updated_item['min_stock_threshold']):
             
             # Send WebSocket notification
             await manager.broadcast_to_business(
                 business_id=business.id,
                 message={
                     "type": "low_stock_alert",
-                    "item_id": menu_item.id,
-                    "item_name": menu_item.name,
-                    "current_stock": menu_item.stock_quantity,
-                    "threshold": menu_item.min_stock_threshold
+                    "item_id": updated_item['id'],
+                    "item_name": updated_item['name'],
+                    "current_stock": updated_item['stock_quantity'],
+                    "threshold": updated_item['min_stock_threshold']
                 }
             )
         
         return InventoryItem(
-            id=menu_item.id,
-            name=menu_item.name,
-            current_stock=menu_item.stock_quantity,
-            min_threshold=menu_item.min_stock_threshold,
-            is_low_stock=menu_item.stock_quantity <= menu_item.min_stock_threshold,
-            is_out_of_stock=menu_item.stock_quantity == 0,
-            last_updated=menu_item.updated_at.isoformat() if menu_item.updated_at else None
+            id=updated_item['id'],
+            name=updated_item['name'],
+            current_stock=updated_item['stock_quantity'],
+            min_threshold=updated_item['min_stock_threshold'],
+            is_low_stock=updated_item['stock_quantity'] <= updated_item['min_stock_threshold'],
+            is_out_of_stock=updated_item['stock_quantity'] == 0,
+            last_updated=updated_item.get('updated_at')
         )
         
+    except HTTPException:
+        raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to update inventory: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to update inventory: {str(e)}"
+        )
 
 
 @router.get("/low-stock", response_model=List[LowStockItem])
@@ -185,25 +211,28 @@ async def get_food_low_stock(
     Get items needing reorder.
     """
     try:
-        low_stock_items = db.query(MenuItem).filter(
-            MenuItem.business_id == business.id,
-            MenuItem.stock_quantity <= MenuItem.min_stock_threshold
-        ).all()
+        response = supabase.table('menu_items').select('*').eq('business_id', business.id).filter('stock_quantity', 'lte', 'min_stock_threshold').execute()
+        
+        if not response.data:
+            return []
         
         alerts = []
-        for item in low_stock_items:
+        for item in response.data:
             alerts.append(LowStockItem(
-                item_id=item.id,
-                item_name=item.name,
-                current_stock=item.stock_quantity,
-                threshold=item.min_stock_threshold,
+                item_id=item['id'],
+                item_name=item['name'],
+                current_stock=item['stock_quantity'],
+                threshold=item['min_stock_threshold'],
                 days_since_last_order=None  # Could be calculated from order history
             ))
         
         return alerts
         
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to get low stock alerts: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to get low stock alerts: {str(e)}"
+        )
 
 
 @router.post("/reorder", response_model=Dict[str, Any])
@@ -218,13 +247,15 @@ async def create_reorder_request(
     """
     try:
         # Get menu item
-        menu_item = db.query(MenuItem).filter(
-            MenuItem.id == reorder_request.item_id,
-            MenuItem.business_id == business.id
-        ).first()
+        item_response = supabase.table('menu_items').select('*').eq('id', reorder_request.item_id).eq('business_id', business.id).execute()
         
-        if not menu_item:
-            raise HTTPException(status_code=404, detail="Menu item not found")
+        if not item_response.data:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Menu item not found"
+            )
+        
+        item = item_response.data[0]
         
         # In a real implementation, this would create a purchase order
         # For now, we'll just log the request and send a notification
@@ -234,24 +265,29 @@ async def create_reorder_request(
             business_id=business.id,
             message={
                 "type": "reorder_request",
-                "item_id": menu_item.id,
-                "item_name": menu_item.name,
+                "item_id": item['id'],
+                "item_name": item['name'],
                 "quantity": reorder_request.quantity,
-                "requested_by": current_user.email if current_user.email else current_user.phone,
+                "requested_by": current_user.email if hasattr(current_user, 'email') and current_user.email else getattr(current_user, 'phone', 'Unknown'),
                 "supplier": reorder_request.supplier,
                 "notes": reorder_request.notes
             }
         )
         
         return {
-            "message": f"Reorder request created for {reorder_request.quantity} units of {menu_item.name}",
-            "item_id": menu_item.id,
-            "item_name": menu_item.name,
+            "message": f"Reorder request created for {reorder_request.quantity} units of {item['name']}",
+            "item_id": item['id'],
+            "item_name": item['name'],
             "requested_quantity": reorder_request.quantity
         }
         
+    except HTTPException:
+        raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to create reorder request: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to create reorder request: {str(e)}"
+        )
 
 
 @router.get("/usage", response_model=List[UsageTracking])
@@ -276,35 +312,37 @@ async def track_ingredient_usage(
             start_date = end_date - timedelta(days=7)
         
         # Get completed orders in the period
-        orders = db.query(Order).filter(
-            and_(
-                Order.business_id == business.id,
-                Order.created_at >= start_date,
-                Order.created_at <= end_date,
-                Order.status.in_(["completed", "delivered"])
-            )
-        ).all()
+        orders_response = supabase.table('orders').select('*').eq('business_id', business.id).gte('created_at', start_date.isoformat()).lte('created_at', end_date.isoformat()).in_('status', ['completed', 'delivered']).execute()
         
         # Track usage by item
         usage_stats = {}
         
-        for order in orders:
-            # Parse order items (assuming they're stored as JSON)
-            for item in order.items:
-                item_id = item.get("menu_item_id")
-                item_name = item.get("name")
-                quantity = item.get("quantity", 1)
-                price = item.get("price", 0)
+        if orders_response.data:
+            for order in orders_response.data:
+                # Parse order items (assuming they're stored as JSON)
+                items = order.get('items', [])
+                if isinstance(items, str):
+                    import json
+                    try:
+                        items = json.loads(items)
+                    except:
+                        items = []
                 
-                if item_id not in usage_stats:
-                    usage_stats[item_id] = {
-                        "name": item_name,
-                        "total_sold": 0,
-                        "total_revenue": 0.0
-                    }
-                
-                usage_stats[item_id]["total_sold"] += quantity
-                usage_stats[item_id]["total_revenue"] += quantity * price
+                for item in items:
+                    item_id = item.get('menu_item_id') or item.get('id')
+                    item_name = item.get('name')
+                    quantity = item.get('quantity', 1)
+                    price = item.get('price', 0)
+                    
+                    if item_id not in usage_stats:
+                        usage_stats[item_id] = {
+                            "name": item_name,
+                            "total_sold": 0,
+                            "total_revenue": 0.0
+                        }
+                    
+                    usage_stats[item_id]["total_sold"] += quantity
+                    usage_stats[item_id]["total_revenue"] += quantity * price
         
         # Convert to response format
         usage_tracking = []
@@ -323,4 +361,7 @@ async def track_ingredient_usage(
         return usage_tracking
         
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to track ingredient usage: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to track ingredient usage: {str(e)}"
+        )
