@@ -227,11 +227,13 @@ class RAGSearch:
         """
         try:
             # Use the existing intent agent for LLM analysis
-            from app.services.ai.global_ai.intent_agent import IntentAgent
+            # Note: Global AI integration removed - using fallback analysis
+            # from app.services.ai.global_ai.intent_agent import IntentAgent
             
             # Create a temporary intent agent for analysis
             # Note: In production, this should be passed from the main handler
-            intent_agent = IntentAgent(None)  # We'll use fallback analysis
+            # intent_agent = IntentAgent(None)  # We'll use fallback analysis
+            pass  # Intent agent removed during integration
             
             # Fallback analysis using the existing logic
             user_message_lower = query.lower()

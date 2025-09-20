@@ -134,6 +134,12 @@ class Settings(BaseSettings):
     SUPABASE_JWT_SECRET: Optional[str] = None
     SUPABASE_PROJECT_ID: Optional[str] = None
 
+    # AWS Configuration (required for Agent Squad / Bedrock)
+    AWS_ACCESS_KEY_ID: Optional[str] = None
+    AWS_SECRET_ACCESS_KEY: Optional[str] = None
+    AWS_DEFAULT_REGION: str = "us-east-1"
+    AWS_REGION: str = "us-east-1"
+
     
     
     # Modern Pydantic configuration - ignore extra fields

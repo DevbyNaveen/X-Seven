@@ -113,3 +113,5 @@ ddtrace
 
 # Database & Authentication
 supabase==2.3.1
+
+crewai>=0.1.0

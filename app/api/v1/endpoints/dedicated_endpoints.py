@@ -10,7 +10,7 @@ from typing import Dict, Any
 from fastapi import APIRouter, Depends, HTTPException
 
 from app.config.database import get_supabase_client
-from app.core.ai.types import ChatContext as ChatType
+from app.services.ai.crewai_orchestrator import get_crewai_orchestrator
 
 router = APIRouter(tags=["Dedicated AI"])
 
@@ -43,26 +43,32 @@ async def dedicated_chat(
         
         business = business_response.data[0]
         business_id = business['id']
+        business_category = business.get('category', 'general')
         
         # Add business context
         context["business_id"] = business_id
         context["selected_business"] = business_id
+        context["business_data"] = business
 
-        # Use Central AI with dedicated chat type
-        central_ai = CentralAIHandler(supabase)  # ✅ Pass supabase instead of db
-        response = await central_ai.chat(
+        # Use CrewAI orchestrator with business category for specialized agent selection
+        orchestrator = get_crewai_orchestrator()
+        response = await orchestrator.process_request(
             message=message,
+            user_id=request.get("user_id") or "anonymous",
             session_id=session_id,
-            chat_type=ChatType.DEDICATED,
-            context=context
+            context=context,
+            business_category=business_category  # This triggers the correct specialized agent
         )
         
         return {
-            "message": response.get("message", ""),
+            "message": response.get("response", ""),
             "session_id": session_id,
-            "success": response.get("success", True),
+            "success": True,
             "chat_type": "dedicated",
             "business_id": business_id,
+            "business_category": business_category,
+            "agent_used": response.get("agent_used", "unknown"),
+            "processing_method": response.get("processing_method", "crewai_dedicated"),
             "suggested_actions": [],
         }
         
@@ -71,27 +77,6 @@ async def dedicated_chat(
     except Exception as e:
         logging.error(f"Dedicated chat error: {e}")
         raise HTTPException(status_code=500, detail=f"Chat service error: {str(e)}")
-    
-    # Handle initialization request
-    if not message:
-        return {
-            "success": True,
-            "session_id": session_id,
-            "business_id": business.id,
-            "business_name": business.name,
-            "welcome_message": f"Welcome to {business.name}! How can I help you today?",
-            "entry_point": request.get("entry_point", "direct")
-        }
-    
-    response = await handler.process_message(
-        message=message,
-        session_id=session_id,
-        business_id=business.id,
-        user_id=request.get("user_id"),
-        additional_context=request.get("context", {})
-    )
-    
-    return response
 
 
 @router.get("/health")
