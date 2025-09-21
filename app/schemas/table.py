@@ -3,7 +3,7 @@ from typing import Optional
 from pydantic import BaseModel, Field, field_validator
 from app.schemas.base import BaseSchema, TimestampSchema, IDSchema
 from app.models.table import TableStatus
-
+from uuid import UUID
 
 class TableBase(BaseSchema):
     """Base table fields."""
@@ -77,8 +77,9 @@ class TableUpdate(BaseSchema):
 
 class TableResponse(TableBase, IDSchema, TimestampSchema):
     """Table response with all fields."""
-    business_id: int
-    qr_code_id: str
+    id: UUID  
+    business_id: UUID
+    qr_code_id:  Optional[UUID]
     qr_code_url: Optional[str]
     status: TableStatus
     

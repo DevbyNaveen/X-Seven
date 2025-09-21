@@ -1,10 +1,10 @@
 """Food order management endpoints for AI integration."""
 from typing import Any, List, Optional, Dict
-from datetime import datetime
+from datetime import datetime, timedelta
 from fastapi import APIRouter, Depends, HTTPException, status, Query, BackgroundTasks
 from pydantic import BaseModel, Field, field_validator
 from decimal import Decimal
-
+from uuid import UUID
 from app.config.database import get_supabase_client
 from app.core.dependencies import get_current_business, get_current_user
 from app.models import OrderStatus, Business, User, PaymentStatus, PaymentMethod
@@ -26,7 +26,8 @@ class OrderItem(BaseModel):
 
 class OrderCreate(BaseModel):
     """Create new order."""
-    table_id: Optional[int] = Field(None, description="Table ID for dine-in orders")
+    table_id: Optional[UUID] = Field(None, description="Table ID for dine-in orders")  # Changed to UUID
+    table_number: Optional[str] = Field(None, max_length=10, description="Table number for dine-in orders")
     customer_name: Optional[str] = Field(None, max_length=100)
     customer_phone: Optional[str] = Field(None, max_length=20)
     customer_email: Optional[str] = Field(None, max_length=100)
@@ -53,9 +54,9 @@ class OrderUpdate(BaseModel):
 
 class OrderResponse(BaseModel):
     """Order response."""
-    id: int
-    business_id: int
-    table_id: Optional[int]
+    id: UUID
+    business_id: UUID
+    table_id: Optional[UUID]  # Changed to UUID
     customer_name: Optional[str]
     customer_phone: Optional[str]
     customer_email: Optional[str]
@@ -92,15 +93,31 @@ async def create_order(
         tip_amount = Decimal('0.00')  # Default no tip
         total_amount = subtotal + tax_amount + tip_amount
 
-        # Prepare order data
+        table_id = None
+        if order_data.table_number:
+            # Look up the table ID from the table number
+            table_response = supabase.table('tables').select('id').eq('business_id', business.id).eq('table_number', order_data.table_number).execute()
+            if table_response.data:
+                table_id = table_response.data[0]['id']
+        elif order_data.table_id:
+            table_id = order_data.table_id
+
         order_dict = {
-            'business_id': business.id,
-            'table_id': order_data.table_id,
+            'business_id': str(business.id),  # Convert UUID to string
+            'table_id': str(table_id) if table_id else None,  # Convert UUID to string
             'customer_name': order_data.customer_name,
             'customer_phone': order_data.customer_phone,
             'customer_email': order_data.customer_email,
             'order_type': order_data.order_type,
-            'items': [item.dict() for item in order_data.items],
+            'items': [
+                {
+                    'menu_item_id': item.menu_item_id,
+                    'name': item.name,
+                    'quantity': item.quantity,
+                    'price': float(item.price),  # Convert Decimal to float
+                    'special_instructions': item.special_instructions
+                } for item in order_data.items
+            ],
             'subtotal': float(subtotal),
             'tax_amount': float(tax_amount),
             'tip_amount': float(tip_amount),
@@ -129,8 +146,8 @@ async def create_order(
             business_id=business.id,
             message={
                 "type": "new_order",
-                "order_id": order['id'],
-                "table_id": order_data.table_id,
+                "order_id": str(order['id']),  # Convert UUID to string
+                "table_id": str(order_data.table_id) if order_data.table_id else None,
                 "order_type": order_data.order_type,
                 "total_amount": float(total_amount),
                 "customer_name": order_data.customer_name
@@ -138,7 +155,7 @@ async def create_order(
         )
 
         # Add background task for order processing
-        background_tasks.add_task(process_new_order, order['id'], business.id, supabase)
+        background_tasks.add_task(process_new_order, str(order['id']), str(business.id), supabase)
 
         return order
 
@@ -156,7 +173,7 @@ async def create_order(
 async def get_orders(
     status: Optional[OrderStatus] = Query(None, description="Filter by order status"),
     order_type: Optional[str] = Query(None, description="Filter by order type"),
-    table_id: Optional[int] = Query(None, description="Filter by table ID"),
+    table_id: Optional[UUID] = Query(None, description="Filter by table ID"),  # Changed to UUID
     limit: int = Query(50, ge=1, le=100, description="Number of orders to return"),
     business: Business = Depends(get_current_business),
     supabase = Depends(get_supabase_client)
@@ -173,7 +190,7 @@ async def get_orders(
         if order_type:
             query = query.eq('order_type', order_type)
         if table_id:
-            query = query.eq('table_id', table_id)
+            query = query.eq('table_id', str(table_id))  # Convert UUID to string for query
 
         # Order by creation date (newest first)
         response = query.order('created_at', desc=True).limit(limit).execute()
@@ -213,7 +230,7 @@ async def get_active_orders(
 
 @router.get("/{order_id}", response_model=OrderResponse)
 async def get_order(
-    order_id: int,
+    order_id: UUID,
     business: Business = Depends(get_current_business),
     supabase = Depends(get_supabase_client)
 ) -> Any:
@@ -243,7 +260,7 @@ async def get_order(
 
 @router.put("/{order_id}", response_model=OrderResponse)
 async def update_order(
-    order_id: int,
+    order_id: UUID,
     order_update: OrderUpdate,
     background_tasks: BackgroundTasks,
     business: Business = Depends(get_current_business),
@@ -284,7 +301,15 @@ async def update_order(
             total_amount = subtotal + tax_amount + tip_amount
 
             update_data.update({
-                'items': [item.dict() for item in order_update.items],
+                'items': [
+                    {
+                        'menu_item_id': item.menu_item_id,
+                        'name': item.name,
+                        'quantity': item.quantity,
+                        'price': float(item.price),  # Convert Decimal to float
+                        'special_instructions': item.special_instructions
+                    } for item in order_update.items
+                ],
                 'subtotal': float(subtotal),
                 'tax_amount': float(tax_amount),
                 'total_amount': float(total_amount)
@@ -307,7 +332,7 @@ async def update_order(
                 business_id=business.id,
                 message={
                     "type": "order_status_update",
-                    "order_id": order_id,
+                    "order_id": str(order_id),  # Convert UUID to string
                     "old_status": old_status,
                     "new_status": order_update.status.value,
                     "table_id": current_order.get('table_id')
@@ -316,7 +341,7 @@ async def update_order(
 
         # Add background task for order processing if status changed
         if order_update.status:
-            background_tasks.add_task(process_order_status_change, order_id, order_update.status.value, business.id, supabase)
+            background_tasks.add_task(process_order_status_change, str(order_id), order_update.status.value, str(business.id), supabase)
 
         return updated_order
 
@@ -332,7 +357,7 @@ async def update_order(
 
 @router.delete("/{order_id}")
 async def cancel_order(
-    order_id: int,
+    order_id: UUID,
     reason: Optional[str] = Query(None, max_length=500, description="Cancellation reason"),
     business: Business = Depends(get_current_business),
     current_user: User = Depends(get_current_user),
@@ -365,7 +390,7 @@ async def cancel_order(
             'status': 'cancelled',
             'updated_at': datetime.utcnow().isoformat(),
             'cancellation_reason': reason,
-            'cancelled_by': current_user.id,
+            'cancelled_by': str(current_user.id),  # Convert UUID to string
             'cancelled_at': datetime.utcnow().isoformat()
         }
 
@@ -382,13 +407,13 @@ async def cancel_order(
             business_id=business.id,
             message={
                 "type": "order_cancelled",
-                "order_id": order_id,
+                "order_id": str(order_id),  # Convert UUID to string
                 "table_id": current_order.get('table_id'),
                 "reason": reason
             }
         )
 
-        return {"message": f"Order {order_id} cancelled successfully", "order_id": order_id}
+        return {"message": f"Order {order_id} cancelled successfully", "order_id": str(order_id)}
 
     except HTTPException:
         raise
@@ -402,7 +427,7 @@ async def cancel_order(
 
 @router.put("/{order_id}/payment", response_model=OrderResponse)
 async def process_payment(
-    order_id: int,
+    order_id: UUID,  # Changed from int to UUID
     payment_amount: Decimal = Query(..., gt=0, description="Payment amount"),
     payment_method: PaymentMethod = Query(..., description="Payment method"),
     business: Business = Depends(get_current_business),
@@ -463,7 +488,7 @@ async def process_payment(
             business_id=business.id,
             message={
                 "type": "payment_completed",
-                "order_id": order_id,
+                "order_id": str(order_id),  # Convert UUID to string
                 "amount": float(payment_amount),
                 "payment_method": payment_method.value,
                 "table_id": current_order.get('table_id')
@@ -537,7 +562,7 @@ async def get_order_stats(
 
 
 # Background task functions
-async def process_new_order(order_id: int, business_id: int, supabase):
+async def process_new_order(order_id: str, business_id: str, supabase):  # Changed parameter types to str
     """Process a new order (send notifications, update inventory, etc.)"""
     try:
         logger.info(f"Processing new order {order_id} for business {business_id}")
@@ -549,7 +574,7 @@ async def process_new_order(order_id: int, business_id: int, supabase):
         logger.error(f"Error processing new order {order_id}: {str(e)}")
 
 
-async def process_order_status_change(order_id: int, new_status: str, business_id: int, supabase):
+async def process_order_status_change(order_id: str, new_status: str, business_id: str, supabase):  # Changed parameter types to str
     """Process order status changes"""
     try:
         logger.info(f"Processing status change for order {order_id} to {new_status}")

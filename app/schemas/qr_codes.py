@@ -8,18 +8,18 @@ from enum import Enum
 
 class QRCodeType(str, Enum):
     """Types of QR codes."""
-    TABLE = "table"
-    MENU = "menu"
+    TABLE = "TABLE"          # Changed to uppercase to match frontend
+    MENU = "MENU"            # Changed to uppercase to match frontend
     BUSINESS_CARD = "business_card"
     ORDER = "order"
-    CUSTOM = "custom"
+    CUSTOM = "CUSTOM"        # Changed to uppercase to match frontend
 
 
 class QRCodeCreate(BaseSchema):
     """Create a new QR code."""
     type: QRCodeType
-    table_id: Optional[int] = Field(None, gt=0, description="Table ID for table QR codes")
-    order_id: Optional[int] = Field(None, gt=0, description="Order ID for order QR codes")
+    table_id: Optional[str] = Field(None, description="Table ID for table QR codes")  # Changed from int to str
+    order_id: Optional[str] = Field(None, description="Order ID for order QR codes")  # Changed from int to str
     custom_data: Optional[str] = Field(None, max_length=1000, description="Custom data for custom QR codes")
     size: int = Field(256, ge=64, le=2048, description="QR code size in pixels (64-2048)")
     color: str = Field("#000000", description="QR code color (hex format)")
@@ -69,7 +69,11 @@ class QRCodeResponse(BaseSchema):
     color: str
     background_color: str
     created_at: datetime
-    business_id: int
+    business_id: str  # Changed from int to str for UUID compatibility
+    table_id: Optional[str] = None  # Changed from int to str for UUID table IDs
+    logo_url: Optional[str] = None  # Added for logo support
+    scan_count: Optional[int] = None  # Added for analytics
+    last_scanned_at: Optional[datetime] = None  # Added for analytics
 
 
 class QRCodeTemplate(BaseSchema):
@@ -284,3 +288,21 @@ class QRCodeHealthCheck(BaseSchema):
     average_generation_time: float
     last_check: datetime
     issues: List[str] = []
+
+
+# Additional schema for food-specific analytics
+class FoodQRCodeAnalytics(QRCodeAnalytics):
+    """Food-specific QR code analytics."""
+    scans_by_food_item: Optional[Dict[str, int]] = None
+    average_order_value: Optional[float] = None
+    peak_scanning_hours: Optional[List[int]] = None
+
+
+# QR code update schema
+class QRCodeUpdate(BaseSchema):
+    """QR code update configuration."""
+    size: Optional[int] = None
+    color: Optional[str] = None
+    background_color: Optional[str] = None
+    logo_url: Optional[str] = None
+    template_id: Optional[str] = None

@@ -17,32 +17,13 @@ from app.schemas.qr_codes import (
     QRCodeType,
     QRCodeTemplate,
     QRCodeAnalytics,
-    QRCodeBatch
+    QRCodeBatch,
+    FoodQRCodeAnalytics,
+    QRCodeUpdate
 )
 from app.services.websocket.connection_manager import manager
 
 router = APIRouter()
-
-
-class QRCodeUpdate(BaseModel):
-    """QR code update configuration."""
-    size: Optional[int] = None
-    color: Optional[str] = None
-    background_color: Optional[str] = None
-    logo_url: Optional[str] = None
-    template_id: Optional[str] = None
-
-
-class QRCodeFoodTemplate(QRCodeTemplate):
-    """Food-specific QR code template."""
-    category: str = "food"
-
-
-class FoodQRCodeAnalytics(QRCodeAnalytics):
-    """Food-specific QR code analytics."""
-    scans_by_food_item: Optional[Dict[str, int]] = None
-    average_order_value: Optional[float] = None
-    peak_scanning_hours: Optional[List[int]] = None
 
 
 @router.get("/", response_model=List[QRCodeResponse])
@@ -57,7 +38,7 @@ async def get_food_qr_codes(
     """
     try:
         # Get tables for this business
-        tables_response = supabase.table('tables').select('*').eq('business_id', business.id).execute()
+        tables_response = supabase.table('tables').select('*').eq('business_id', str(business.id)).execute()
         
         qr_codes = []
         qr_generator = QRCodeGenerator()
@@ -72,7 +53,7 @@ async def get_food_qr_codes(
                 # Generate QR code data
                 qr_data = json.dumps({
                     "type": "table",
-                    "business_id": business.id,
+                    "business_id": str(business.id),
                     "business_name": business.name,
                     "table_id": table['id'],
                     "table_number": table['table_number'],
@@ -90,14 +71,15 @@ async def get_food_qr_codes(
                 
                 qr_codes.append(QRCodeResponse(
                     id=f"table_{table['id']}",
-                    type=QRCodeType.TABLE,
+                    type=QRCodeType.TABLE,  # Use enum value
                     data=qr_data,
                     image_base64=img_str,
                     size=256,
                     color="#000000",
                     background_color="#FFFFFF",
                     created_at=table.get('created_at') or datetime.utcnow(),
-                    business_id=business.id
+                    business_id=str(business.id),
+                    table_id=table['id']
                 ))
         
         # Filter by type if specified
@@ -106,7 +88,7 @@ async def get_food_qr_codes(
         
         # Filter by table_id if specified
         if table_id:
-            qr_codes = [qr for qr in qr_codes if qr.type == QRCodeType.TABLE and f"\"table_id\": {table_id}" in qr.data]
+            qr_codes = [qr for qr in qr_codes if qr.type == QRCodeType.TABLE and qr.table_id == table_id]
         
         return qr_codes
         
@@ -138,7 +120,7 @@ async def generate_food_qr_code(
                 )
             
             # Get table
-            table_response = supabase.table('tables').select('*').eq('id', qr_data.table_id).eq('business_id', business.id).execute()
+            table_response = supabase.table('tables').select('*').eq('id', qr_data.table_id).eq('business_id', str(business.id)).execute()
             
             if not table_response.data:
                 raise HTTPException(
@@ -154,7 +136,7 @@ async def generate_food_qr_code(
             
             qr_code_data = json.dumps({
                 "type": "table",
-                "business_id": business.id,
+                "business_id": str(business.id),
                 "business_name": business.name,
                 "table_id": table['id'],
                 "table_number": table['table_number'],
@@ -169,7 +151,7 @@ async def generate_food_qr_code(
             
             qr_code_data = json.dumps({
                 "type": "menu",
-                "business_id": business.id,
+                "business_id": str(business.id),
                 "business_name": business.name,
                 "url": menu_url,
                 "timestamp": datetime.utcnow().isoformat()
@@ -199,7 +181,7 @@ async def generate_food_qr_code(
         img_str = base64.b64encode(img_buffer.getvalue()).decode()
         
         response = QRCodeResponse(
-            id=f"qr_{datetime.utcnow().timestamp()}",
+            id=f"qr_{int(datetime.utcnow().timestamp())}",
             type=qr_data.type,
             data=qr_code_data,
             image_base64=img_str,
@@ -207,16 +189,18 @@ async def generate_food_qr_code(
             color=qr_data.color,
             background_color=qr_data.background_color,
             created_at=datetime.utcnow(),
-            business_id=business.id
+            business_id=str(business.id),
+            table_id=qr_data.table_id,
+            logo_url=qr_data.logo_url
         )
         
         # Send WebSocket notification
         await manager.broadcast_to_business(
-            business_id=business.id,
+            business_id=str(business.id),
             message={
                 "type": "qr_code_generated",
                 "qr_code_id": response.id,
-                "qr_code_type": response.type.value
+                "qr_code_type": str(response.type)  # Remove .value since it's already a string
             }
         )
         
@@ -248,7 +232,7 @@ async def bulk_generate_food_qr_codes(
         
         if type == QRCodeType.TABLE:
             # Get tables for this business
-            tables_response = supabase.table('tables').select('*').eq('business_id', business.id).limit(count).execute()
+            tables_response = supabase.table('tables').select('*').eq('business_id', str(business.id)).limit(count).execute()
             
             if tables_response.data:
                 for table in tables_response.data:
@@ -375,12 +359,11 @@ async def update_food_qr_code(
     """
     try:
         # Parse the QR ID to determine what type of QR code it is
-        # This is a simplified approach - in reality, you'd look up the QR code in a database
         if qr_id.startswith("table_"):
-            table_id = int(qr_id.split("_")[1])
+            table_id = qr_id.split("_", 1)[1]  # Handle UUID table IDs
             
             # Get the table
-            table_response = supabase.table('tables').select('*').eq('id', table_id).eq('business_id', business.id).execute()
+            table_response = supabase.table('tables').select('*').eq('id', table_id).eq('business_id', str(business.id)).execute()
             
             if not table_response.data:
                 raise HTTPException(
@@ -393,7 +376,7 @@ async def update_food_qr_code(
             # Create QR code data
             qr_data = QRCodeCreate(
                 type=QRCodeType.TABLE,
-                table_id=table['id'],
+                table_id=table['id'],  # Now a string UUID
                 size=update_data.size or 256,
                 color=update_data.color or "#000000",
                 background_color=update_data.background_color or "#FFFFFF",
@@ -405,7 +388,7 @@ async def update_food_qr_code(
             
             # Send WebSocket notification
             await manager.broadcast_to_business(
-                business_id=business.id,
+                business_id=str(business.id),
                 message={
                     "type": "qr_code_updated",
                     "qr_code_id": response.id,
@@ -427,4 +410,78 @@ async def update_food_qr_code(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Error updating QR code: {str(e)}"
+        )
+
+
+@router.get("/{qr_id}", response_model=QRCodeResponse)
+async def get_single_qr_code(
+    qr_id: str,
+    business: Business = Depends(get_current_business),
+    supabase = Depends(get_supabase_client)
+) -> Any:
+    """
+    Get a single QR code by ID.
+    """
+    try:
+        if qr_id.startswith("table_"):
+            table_id = qr_id.split("_", 1)[1]  # Handle UUID table IDs
+            
+            # Get the table
+            table_response = supabase.table('tables').select('*').eq('id', table_id).eq('business_id', str(business.id)).execute()
+            
+            if not table_response.data:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail="QR code not found"
+                )
+            
+            table = table_response.data[0]
+            
+            # Regenerate the QR code
+            qr_generator = QRCodeGenerator()
+            
+            base_url = f"https://x-sevenai.com/chat/{business.slug}"
+            table_url = f"{base_url}?table_id={table['id']}&business_id={business.id}"
+            
+            qr_data = json.dumps({
+                "type": "table",
+                "business_id": str(business.id),
+                "business_name": business.name,
+                "table_id": table['id'],
+                "table_number": table['table_number'],
+                "url": table_url,
+                "timestamp": datetime.utcnow().isoformat()
+            })
+            
+            qr_image = qr_generator.generate_qr_code(qr_data)
+            
+            img_buffer = io.BytesIO()
+            qr_image.save(img_buffer, format='PNG')
+            img_str = base64.b64encode(img_buffer.getvalue()).decode()
+            
+            return QRCodeResponse(
+                id=qr_id,
+                type=QRCodeType.TABLE,
+                data=qr_data,
+                image_base64=img_str,
+                size=256,
+                color="#000000",
+                background_color="#FFFFFF",
+                created_at=table.get('created_at') or datetime.utcnow(),
+                business_id=str(business.id),
+                table_id=table['id']  # Now a string UUID
+            )
+        
+        else:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="QR code not found"
+            )
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Error retrieving QR code: {str(e)}"
         )

@@ -3,7 +3,7 @@ from typing import Any, List, Optional, Dict
 from datetime import datetime
 from fastapi import APIRouter, Depends, HTTPException, status, Query
 from pydantic import BaseModel, Field, field_validator
-
+from uuid import UUID
 from app.config.database import get_supabase_client
 from app.core.dependencies import get_current_business, get_current_user
 from app.models import TableStatus, Business, User, OrderStatus, PaymentStatus, PaymentMethod
@@ -69,7 +69,7 @@ async def create_table(
         
         # Create table data
         table_dict = {
-            'business_id': business.id,
+            'business_id': str(business.id),  # Convert UUID to string
             'table_number': table_data.table_number,
             'capacity': table_data.capacity,
             'section': table_data.section,
@@ -97,7 +97,7 @@ async def create_table(
             business_id=business.id,
             message={
                 "type": "table_created",
-                "table_id": created_table['id'],
+                "table_id": str(created_table['id']),  # Convert UUID to string
                 "table_number": created_table['table_number']
             }
         )
@@ -115,7 +115,7 @@ async def create_table(
 
 @router.get("/{table_id}/qr", response_model=Dict[str, Any])
 async def get_table_qr_code(
-    table_id: int,
+    table_id: UUID,
     size: int = Query(256, ge=64, le=2048, description="QR code size in pixels"),
     color: str = Query("#000000", description="QR code color"),
     background_color: str = Query("#FFFFFF", description="QR code background color"),
@@ -144,11 +144,12 @@ async def get_table_qr_code(
         base_url = f"https://x-sevenai.com/chat/{business.slug}"
         table_url = f"{base_url}?table_id={table_id}&business_id={business.id}"
         
+        # Convert UUIDs to strings for JSON serialization
         qr_data = json.dumps({
             "type": "table",
-            "business_id": business.id,
+            "business_id": str(business.id),  # Convert UUID to string
             "business_name": business.name,
-            "table_id": table_id,
+            "table_id": str(table_id),       # Convert UUID to string
             "table_number": table['table_number'],
             "url": table_url,
             "timestamp": datetime.utcnow().isoformat()
@@ -168,10 +169,10 @@ async def get_table_qr_code(
         qr_code_base64 = base64.b64encode(img_buffer.getvalue()).decode()
         
         return {
-            "table_id": table_id,
+            "table_id": str(table_id),  # Convert to string for consistency
             "table_number": table['table_number'],
             "qr_code": {
-                "id": f"table_{table_id}_qr_{datetime.utcnow().timestamp()}",
+                "id": f"table_{str(table_id)}_qr_{datetime.utcnow().timestamp()}",
                 "image_base64": qr_code_base64,
                 "data": qr_data,
                 "size": size,
@@ -192,7 +193,7 @@ async def get_table_qr_code(
 
 @router.delete("/{table_id}", response_model=Dict[str, Any])
 async def delete_table(
-    table_id: int,
+    table_id: UUID,
     business: Business = Depends(get_current_business),
     supabase = Depends(get_supabase_client)
 ) -> Any:
@@ -241,14 +242,14 @@ async def delete_table(
             business_id=business.id,
             message={
                 "type": "table_deleted",
-                "table_id": table_id,
+                "table_id": str(table_id),  # Convert UUID to string
                 "table_number": table['table_number']
             }
         )
         
         return {
             "message": f"Table {table['table_number']} deleted successfully",
-            "table_id": table_id
+            "table_id": str(table_id)  # Convert UUID to string
         }
         
     except HTTPException:
@@ -296,7 +297,7 @@ async def get_food_tables(
 
 @router.put("/{table_id}/status", response_model=TableResponse)
 async def update_table_status(
-    table_id: int,
+    table_id: UUID,
     status: TableStatus,
     business: Business = Depends(get_current_business),
     supabase = Depends(get_supabase_client)
@@ -336,7 +337,7 @@ async def update_table_status(
             business_id=business.id,
             message={
                 "type": "table_status_update",
-                "table_id": table_id,
+                "table_id": str(table_id),  # Convert UUID to string
                 "table_number": updated_table['table_number'],
                 "old_status": old_status,
                 "new_status": status.value
@@ -356,7 +357,7 @@ async def update_table_status(
 
 @router.post("/{table_id}/assign", response_model=Dict[str, Any])
 async def assign_customer_to_table(
-    table_id: int,
+    table_id: UUID,
     assignment: CustomerAssignment,
     business: Business = Depends(get_current_business),
     current_user: User = Depends(get_current_user),
@@ -400,8 +401,8 @@ async def assign_customer_to_table(
         
         # Create initial order
         order_data = {
-            'business_id': business.id,
-            'table_id': table_id,
+            'business_id': str(business.id),  # Convert UUID to string
+            'table_id': str(table_id),       # Convert UUID to string
             'customer_name': assignment.customer_name,
             'customer_phone': assignment.customer_phone,
             'customer_email': assignment.customer_email,
@@ -448,9 +449,9 @@ async def assign_customer_to_table(
             business_id=business.id,
             message={
                 "type": "table_assigned",
-                "table_id": table_id,
+                "table_id": str(table_id),      # Convert UUID to string
                 "table_number": updated_table['table_number'],
-                "order_id": order['id'],
+                "order_id": str(order['id']),   # Convert UUID to string
                 "customer_name": assignment.customer_name
             }
         )
@@ -458,7 +459,7 @@ async def assign_customer_to_table(
         return {
             "message": f"Customer assigned to table {updated_table['table_number']}",
             "table": updated_table,
-            "order_id": order['id']
+            "order_id": str(order['id'])  # Convert UUID to string
         }
         
     except HTTPException:
@@ -512,7 +513,7 @@ async def check_table_availability(
             "maintenance_count": len(maintenance_tables),
             "available_tables": [
                 {
-                    "id": t['id'],
+                    "id": str(t['id']),  # Convert UUID to string
                     "table_number": t['table_number'],
                     "capacity": t['capacity'],
                     "section": t['section']
