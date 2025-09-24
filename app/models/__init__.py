@@ -5,68 +5,49 @@ This file makes it easy to import all models at once.
 It also ensures all models are registered with Supabase.
 """
 
-# Import all models
 from .base import SupabaseModel
 from .business import Business, SubscriptionPlan, PhoneNumberType, BusinessCategory
-from .user import User, UserRole
-from .table import Table, TableStatus
-from .order import Order, OrderStatus, PaymentStatus, PaymentMethod
-from .phone_number import PhoneNumber, NumberStatus
-from .menu_item import MenuItem, MenuItemStatus
+from .user import User
 from .menu_category import MenuCategory
-from .message import Message, MessageType, MessageStatus
-from .appointment import Appointment, AppointmentStatus
-from .service_provider import ServiceProvider, ServiceProviderStatus
-from .waitlist_entry import WaitlistEntry, WaitlistStatus
+from .menu_item import MenuItem
+from .order import Order, OrderStatus
+from .table import Table, TableStatus
+from .phone_number import PhoneNumber
+from .service_provider import ServiceProvider
+from .appointment import Appointment
+from .waitlist_entry import WaitlistEntry
+from .message import Message
+from .evolution_instance import (
+    EvolutionInstance, 
+    EvolutionMessage, 
+    EvolutionWebhookEvent,
+    InstanceStatus,
+    WhatsAppStatus,
+    MessageType
+)
 
-# Export all models
 __all__ = [
-    # Base
     "SupabaseModel",
-    
-    # Business
     "Business",
-    "SubscriptionPlan",
-    "PhoneNumberType", 
+    "SubscriptionPlan", 
+    "PhoneNumberType",
     "BusinessCategory",
-    
-    # User
     "User",
-    "UserRole",
-    
-    # Table
-    "Table",
-    "TableStatus",
-    
-    # Order
+    "MenuCategory",
+    "MenuItem", 
     "Order",
     "OrderStatus",
-    "PaymentStatus",
-    "PaymentMethod",
-    
-    # Phone
+    "Table",
+    "TableStatus",
     "PhoneNumber",
-    "NumberStatus",
-    
-    # Menu
-    "MenuItem",
-    "MenuItemStatus",
-    "MenuCategory",
-    
-    # Message
-    "Message",
-    "MessageType",
-    "MessageStatus",
-    
-    # Appointment
-    "Appointment",
-    "AppointmentStatus",
-    
-    # Service Provider
     "ServiceProvider",
-    "ServiceProviderStatus",
-    
-    # Waitlist
+    "Appointment",
     "WaitlistEntry",
-    "WaitlistStatus",
+    "Message",
+    "EvolutionInstance",
+    "EvolutionMessage",
+    "EvolutionWebhookEvent",
+    "InstanceStatus",
+    "WhatsAppStatus",
+    "MessageType"
 ]

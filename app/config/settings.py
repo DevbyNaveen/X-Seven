@@ -94,6 +94,7 @@ class Settings(BaseSettings):
     
     # API URL for webhooks and callbacks
     API_URL: str = "http://localhost:8000"
+    BASE_URL: str = "http://localhost:8000"  # Base URL for Evolution API webhooks
     
     # --- These names now match your .env file ---
     WHATSAPP_UNIVERSAL_NUMBER: Optional[str] = None
@@ -125,6 +126,17 @@ class Settings(BaseSettings):
         "LT": ["vonage", "twilio"],
 
     }
+    
+    # Evolution API Configuration
+    EVOLUTION_API_URL: Optional[str] = "http://localhost:8080"
+    EVOLUTION_API_KEY: Optional[str] = None
+    EVOLUTION_DEFAULT_WEBHOOK: Optional[str] = None
+    EVOLUTION_MAX_INSTANCES_PER_SERVER: int = 500
+    EVOLUTION_SESSION_TIMEOUT: int = 3600000  # 1 hour in milliseconds
+    EVOLUTION_RATE_LIMIT_PER_INSTANCE: int = 1000  # Messages per hour
+    EVOLUTION_WEBHOOK_TIMEOUT: int = 30  # Webhook timeout in seconds
+    EVOLUTION_RETRY_ATTEMPTS: int = 3
+    EVOLUTION_RETRY_DELAY: int = 5  # Seconds between retries
     
     # Supabase
     SUPABASE_URL: Optional[str] = None

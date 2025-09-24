@@ -1,0 +1,64 @@
+LOCAL VOICE CALL ARCHITECTURE:
+
+┌─────────────────┐    ┌─────────────────┐    ┌─────────────────┐
+│   Customer      │    │  Phone Provider │    │  X-SevenAI      │
+│   Phone Call    │◄──►│  (Twilio)       │◄──►│  Backend        │
+│                 │    │                 │    │                 │
+│   ☎️ Calls      │    │  Webhook        │    │  PipeCat AI     │
+│   +1234567890   │    │  Forwarding     │    │  Voice Engine   │
+└─────────────────┘    └─────────────────┘    └─────────────────┘
+
+VOICE CALL FLOW:
+
+1. CUSTOMER DIALS VIRTUAL NUMBER:
+   - Customer calls: +1 (555) 123-4567 (your business number)
+   - This is a Twilio/Vonage virtual number
+
+2. PHONE PROVIDER RECEIVES CALL:
+   - Twilio/Vonage gets the incoming call
+   - They forward it to your webhook URL
+   - Webhook: https://your-domain.com/api/v1/voice/webhook
+
+3. YOUR BACKEND PROCESSES CALL:
+   - FastAPI receives webhook from Twilio
+   - Extracts call details (caller number, business ID)
+   - Routes to appropriate business AI instance
+
+4. VOICE AI PROCESSING:
+   - PipeCat handles the voice conversation
+   - Converts speech to text (STT)
+   - Processes with your DSPy AI modules
+   - Converts text response to speech (TTS)
+
+5. RESPONSE SENT BACK:
+   - AI response sent back to Twilio
+   - Twilio plays audio to customer
+   - Real-time conversation ensues
+
+INTEGRATION POINTS:
+
+┌─────────────────┐    ┌─────────────────┐    ┌─────────────────┐
+│   Twilio        │    │  X-SevenAI      │    │  PipeCat        │
+│   Voice API     │◄──►│  FastAPI        │◄──►│  Voice Engine   │
+│                 │    │                 │    │                 │
+│ • Call Routing  │    │ • Call Handling │    │ • STT/TTS       │
+│ • Audio Stream  │    │ • AI Processing │    │ • Conversation  │
+│ • Webhooks      │    │ • Business Logic│    │ • Real-time     │
+└─────────────────┘    └─────────────────┘    └─────────────────┘
+
+VOICE API ENDPOINTS:
+
+POST /api/v1/voice/webhook
+- Receives incoming calls from Twilio
+- Processes call with AI
+- Returns audio responses
+
+POST /api/v1/voice/status
+- Call status updates
+- Billing information
+- Analytics data
+
+GET /api/v1/voice/health
+- Voice system health check
+- PipeCat status
+- Twilio connection status

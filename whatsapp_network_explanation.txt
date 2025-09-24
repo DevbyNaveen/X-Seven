@@ -1,0 +1,47 @@
+WHATSAPP NETWORK DISCOVERY EXPLANATION:
+
+┌─────────────────┐    ┌─────────────────┐    ┌─────────────────┐
+│   Customer's    │    │  WhatsApp       │    │  Evolution API  │
+│   WhatsApp      │◄──►│  Network        │◄──►│  (WhatsApp Web) │
+│                 │    │  (Global)       │    │                 │
+└─────────────────┘    └─────────────────┘    └─────────────────┘
+
+HOW IT WORKS:
+
+1. WHATSAPP WEB CONNECTION:
+   - Evolution API connects to WhatsApp using WhatsApp Web protocol
+   - This is the SAME protocol as WhatsApp Web on desktop
+   - Uses Baileys library to handle the connection
+
+2. NUMBER REGISTRATION:
+   - When you scan QR code, the virtual number gets "registered" 
+   - WhatsApp's servers now know this number is active
+   - The number becomes discoverable on WhatsApp's global network
+
+3. NETWORK DISCOVERY:
+   - Customer searches for +1234567890 in WhatsApp
+   - WhatsApp servers check their registry
+   - Find the number is connected via Evolution API
+   - Allow the connection between customer and business
+
+4. MESSAGE ROUTING:
+   - Customer sends message to +1234567890
+   - Message goes to WhatsApp's servers
+   - WhatsApp servers route it to the Evolution API instance
+   - Evolution API sends webhook to your backend
+   - Your AI processes and responds
+
+KEY POINT:
+Evolution API acts as a "WhatsApp Web client" that stays permanently connected.
+It's like having a computer that's always logged into WhatsApp Web for each business.
+
+TECHNICAL DETAILS:
+- Uses WebSocket connections to WhatsApp servers
+- Maintains persistent sessions
+- Handles encryption/decryption automatically
+- Appears as a regular WhatsApp Web session to WhatsApp's network
+
+RESULT:
+- Virtual number becomes fully discoverable on WhatsApp
+- Customers can find it like any other WhatsApp number
+- No difference from a regular WhatsApp Business account

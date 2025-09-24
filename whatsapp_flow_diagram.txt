@@ -1,0 +1,29 @@
+WHATSAPP CONNECTION FLOW:
+
+┌─────────────────┐    ┌─────────────────┐    ┌─────────────────┐
+│   Virtual Phone │    │  Evolution API  │    │  Customer's     │
+│   Number from   │◄──►│  Instance       │◄──►│  WhatsApp       │
+│   Twilio/Vonage │    │  (WhatsApp Web) │    │  (Messages)     │
+│                 │    │                 │    │                 │
+│   +1234567890   │    │   Connected     │    │   "Hey, I want  │
+│   (Not WhatsApp │    │   to WhatsApp   │    │    coffee!"     │
+│   enabled yet)  │    │                 │    │                 │
+└─────────────────┘    └─────────────────┘    └─────────────────┘
+
+CONNECTION PROCESS:
+
+1. Twilio/Vonage gives you: +1234567890 (regular phone number)
+
+2. Evolution API creates instance for this number
+
+3. Evolution API generates QR code for WhatsApp connection
+
+4. You scan QR code with a phone that has WhatsApp
+
+5. WhatsApp Web connects the number to WhatsApp network
+
+6. Now the number +1234567890 is discoverable on WhatsApp
+
+7. Customer can search for +1234567890 in WhatsApp and message it
+
+8. Messages flow: Customer → WhatsApp Network → Evolution API → Your Backend → AI Response

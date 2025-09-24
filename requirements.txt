@@ -200,3 +200,9 @@ aiortc>=1.6.0
 speechrecognition>=3.10.0
 # Enhanced TTS/STT integrations
 azure-cognitiveservices-speech>=1.34.0
+
+# Evolution API Integration Dependencies
+aiohttp>=3.9.1  # For async HTTP client in Evolution API
+requests>=2.31.0  # HTTP requests library
+websocket-client>=1.6.0  # WebSocket support for Evolution API
+python-magic>=0.4.27  # File type detection for media messages

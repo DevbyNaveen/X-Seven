@@ -14,6 +14,7 @@ from app.api.v1.endpoints.dashboard import business_dashboard as dashboard
 from app.api.v1.endpoints.food import menu as food_menu, order as food_order, table as food_table, inventory as food_inventory, qr as food_qr
 from app.api.v1.endpoints.food.websocket.dashboard_websocket import router as dashboard_ws_router
 from app.api.v1.endpoints.food.websocket.kitchen_websocket import router as kitchen_ws_router
+from app.api.v1.evolution_api import router as evolution_router
 # from app.api.v1.endpoints.AREndpoints.analytics import router as analytics_router
 # from app.api.v1.endpoints.AREndpoints.reports import router as reports_router
 # from app.api.v1.endpoints.AREndpoints.business_intelligence import router as business_intelligence_router
@@ -64,6 +65,13 @@ api_router.include_router(
     kafka_endpoints.router,
     prefix="/kafka",
     tags=["Kafka Management"]
+)
+
+# Include Evolution API endpoints
+api_router.include_router(
+    evolution_router,
+    prefix="/evolution",
+    tags=["Evolution API"]
 )
 
 api_router.include_router(

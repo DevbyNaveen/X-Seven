@@ -1,0 +1,84 @@
+BUSINESS ONBOARDING FLOW:
+
+┌─────────────────┐    ┌─────────────────┐    ┌─────────────────┐
+│   New Business  │    │  Phone Provider │    │  Evolution API  │
+│   Signs Up      │    │  (Twilio)       │    │  (WhatsApp)     │
+├─────────────────┤    ├─────────────────┤    ├─────────────────┤
+│ • Name: Cafe A  │    │ • Virtual #     │    │ • Instance      │
+│ • Category: Food│    │ • Voice Ready   │    │ • WhatsApp Ready│
+│ • Location: US  │    │ • SMS Ready     │    │ • QR Code       │
+└─────────────────┘    └─────────────────┘    └─────────────────┘
+
+ONBOARDING STEPS:
+
+1. BUSINESS REGISTRATION:
+   - Business creates account
+   - Selects country: "United States"
+   - Chooses plan: "Pro" (includes phone)
+
+2. VIRTUAL NUMBER PROVISIONING:
+   - Twilio/Vonage provides: +1 (555) 123-4567
+   - Number is voice & SMS capable
+   - Configured for your account
+
+3. EVOLUTION API INSTANCE:
+   - Create instance: "business_cafe_a"
+   - Link to phone number: +1 (555) 123-4567
+   - Generate WhatsApp QR code
+
+4. WHATSAPP CONNECTION:
+   - Business scans QR code
+   - Number connects to WhatsApp
+   - Now accepts WhatsApp messages
+
+5. VOICE CONFIGURATION:
+   - Twilio routes calls to your webhook
+   - PipeCat handles voice AI
+   - Same number for calls & WhatsApp
+
+RESULT FOR BUSINESS:
+┌─────────────────────────────────┐
+│   Cafe A Communication          │
+├─────────────────────────────────┤
+│ Phone: +1 (555) 123-4567        │
+│ WhatsApp: ✅ Connected          │
+│ Voice AI: ✅ Active             │
+│ Monthly Cost: $35               │
+└─────────────────────────────────┘
+
+CUSTOMER EXPERIENCE:
+┌─────────────────┐    ┌─────────────────┐
+│   Customer      │    │   Cafe A        │
+│                 │    │   +15551234567  │
+├─────────────────┤    ├─────────────────┤
+│ ☎️ Calls number │    │ Voice AI: "Hi,  │
+│                 │    │ welcome to Cafe A!"│
+│                 │    │                 │
+│ 💬 WhatsApp msg │    │ Text AI: "Hi,   │
+│                 │    │ how can I help?"│
+└─────────────────┘    └─────────────────┘
+
+COST BREAKDOWN:
+┌─────────────────┐    ┌─────────────────┐
+│   Phone Provider│    │  X-SevenAI      │
+├─────────────────┤    ├─────────────────┤
+│ • Virtual #     │    │ • Evolution API │
+│ • Voice routing │    │ • AI processing │
+│ • SMS support   │    │ • Analytics     │
+│                 │    │                 │
+│ $25/month       │    │ $10/month       │
+│ (Twilio/Vonage) │    │ (Your service)  │
+└─────────────────┘    └─────────────────┘
+
+MULTI-BUSINESS SCALING:
+┌─────────────────────────────────┐
+│   Business A: +1 (555) 123-4567 │
+│   Business B: +1 (555) 234-5678 │
+│   Business C: +1 (555) 345-6789 │
+│                                 │
+│   Each has separate:            │
+│   • Phone number                │
+│   • Evolution instance          │
+│   • WhatsApp connection         │
+│   • Voice AI configuration      │
+└─────────────────────────────────┘
