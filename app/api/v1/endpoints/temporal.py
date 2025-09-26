@@ -1,4 +1,5 @@
 import os
+
 from fastapi import APIRouter, HTTPException
 from temporalio.client import Client
 
@@ -7,11 +8,15 @@ from app.schemas.order import OrderCreate
 from app.workflows.appointment_workflow import AppointmentWorkflow
 from app.workflows.order_workflow import OrderWorkflow
 
-router = APIRouter()
+# Create router with proper prefix and tags
+router = APIRouter(prefix="/temporal", tags=["Temporal"])
+
 
 async def get_temporal_client():
+    """Get Temporal client connection."""
     temporal_host = os.environ.get("TEMPORAL_HOST", "localhost:7233")
     return await Client.connect(temporal_host)
+
 
 @router.post("/orders", status_code=202)
 async def create_order_workflow(order: OrderCreate, business_id: int):

@@ -55,41 +55,71 @@ class KafkaManager:
         self.logger = logging.getLogger(__name__)
     
     async def initialize(self) -> None:
-        """Initialize Kafka manager and all components"""
+        """Initialize Kafka manager with retry logic"""
         if self._initialized:
             return
+
+        max_retries = 3
+        retry_delay = 5  # seconds
+
+        for attempt in range(max_retries):
+            try:
+                self.logger.info(f"🚀 Initializing Kafka Manager... (attempt {attempt + 1}/{max_retries})")
+
+                # Initialize admin client
+                await self._init_admin_client()
+
+                # Create topics
+                await self._create_topics()
+
+                # Initialize event bus
+                self.event_bus = EventBus()
+                await self.event_bus.start()
+
+                # Initialize producer
+                self.producer = KafkaProducer(self.event_bus)
+                await self.producer.start()
+
+                # Initialize monitoring
+                self.monitor = KafkaMonitor()
+                await self.monitor.start()
+
+                # Initialize health check
+                self.health_check = KafkaHealthCheck(self)
+
+                self._initialized = True
+                self.logger.info("✅ Kafka Manager initialized successfully")
+                return
+
+            except Exception as e:
+                self.logger.warning(f"❌ Failed to initialize Kafka Manager (attempt {attempt + 1}): {e}")
+                if attempt < max_retries - 1:
+                    self.logger.info(f"Retrying in {retry_delay} seconds...")
+                    await asyncio.sleep(retry_delay)
         
+        # If we reach here, all attempts failed
+        self.logger.error("❌ All retry attempts failed. Kafka Manager will be disabled.")
+        raise RuntimeError("Failed to initialize Kafka Manager after all retry attempts")
+    
+    async def health_check_and_reconnect(self) -> bool:
+        """Perform health check and attempt to reconnect if Kafka is down"""
+        if not self.health_check:
+            return False
+
         try:
-            self.logger.info("🚀 Initializing Kafka Manager...")
-            
-            # Initialize admin client
-            await self._init_admin_client()
-            
-            # Create topics
-            await self._create_topics()
-            
-            # Initialize event bus
-            self.event_bus = EventBus()
-            await self.event_bus.start()
-            
-            # Initialize producer
-            self.producer = KafkaProducer(self.event_bus)
-            await self.producer.start()
-            
-            # Initialize monitoring
-            self.monitor = KafkaMonitor()
-            await self.monitor.start()
-            
-            # Initialize health check
-            self.health_check = KafkaHealthCheck(self)
-            
-            self._initialized = True
-            self.logger.info("✅ Kafka Manager initialized successfully")
-            
+            is_healthy = await self.health_check.perform_check()
+            if is_healthy and not self._initialized:
+                self.logger.info("Kafka is now available, attempting to reinitialize...")
+                await self.initialize()
+                return True
+            elif not is_healthy and self._initialized:
+                self.logger.warning("Kafka is no longer available, shutting down...")
+                await self.stop()
+                return False
+            return is_healthy
         except Exception as e:
-            self.logger.error(f"❌ Failed to initialize Kafka Manager: {e}")
-            await self.cleanup()
-            raise
+            self.logger.error(f"Health check failed: {e}")
+            return False
     
     async def start(self) -> None:
         """Start the Kafka manager and all services"""
@@ -183,6 +213,13 @@ class KafkaManager:
         
         await self.admin_client.start()
         self.logger.info("✅ Kafka admin client initialized")
+        
+        # Verify connection by listing topics
+        try:
+            await self.admin_client.list_topics()
+        except Exception as e:
+            self.logger.error(f"Failed to verify Kafka connection: {e}")
+            raise
     
     async def _create_topics(self) -> None:
         """Create Kafka topics based on configuration"""

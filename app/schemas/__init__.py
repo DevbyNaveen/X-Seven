@@ -124,6 +124,12 @@ from app.schemas.bookings import (
     BookingTimeSlot,
 )
 
+# Appointment schemas
+from app.schemas.appointment import (
+    AppointmentCreate,
+    AppointmentResponse,
+)
+
 # Voice Calls schemas
 from app.schemas.voice_calls import (
     VoiceCallCreate,
@@ -238,6 +244,10 @@ __all__ = [
     "BookingResponse",
     "BookingStatus",
     "BookingTimeSlot",
+    
+    # Appointments
+    "AppointmentCreate",
+    "AppointmentResponse",
     
     # Voice Calls
     "VoiceCallCreate",

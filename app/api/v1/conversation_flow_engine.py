@@ -24,7 +24,10 @@ logger = logging.getLogger(__name__)
 
 class ConversationState(BaseModel):
     """State model for LangGraph conversations"""
+    # Required fields first
     conversation_id: str
+
+    # Fields with defaults
     user_id: Optional[str] = None
     business_id: Optional[str] = None
     conversation_type: str = "general"  # dedicated, dashboard, global

@@ -75,16 +75,16 @@ class LLMSettings:
 @dataclass
 class TransportSettings:
     """Transport configuration settings."""
+    # Non-default fields first
     type: TransportType = TransportType.TWILIO
-    # Twilio settings
+    host: str = "0.0.0.0"
+    port: int = 8765
+
+    # Optional fields with defaults
     account_sid: Optional[str] = None
     auth_token: Optional[str] = None
     phone_number: Optional[str] = None
-    # WebRTC settings
     ice_servers: List[Dict[str, Any]] = field(default_factory=list)
-    # WebSocket settings
-    host: str = "0.0.0.0"
-    port: int = 8765
 
 
 @dataclass

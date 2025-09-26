@@ -11,6 +11,8 @@ from typing import Dict, Any, Optional, List
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
 
+logger = logging.getLogger(__name__)  # Initialize logger early for use in import handling
+
 from crewai import Crew, Process
 from app.config.database import get_supabase_client
 from app.services.ai.crewai_agents import CrewAIBaseAgent, RestaurantFoodAgent, BeautySalonAgent, GeneralPurposeAgent
@@ -22,12 +24,10 @@ try:
     from app.services.ai.global_ai.rag_agent import RAGAgent
     from app.services.ai.global_ai.execution_agent import ExecutionAgent
     GLOBAL_AI_AVAILABLE = True
-    print("✅ Global AI modules imported successfully")
+    logger.info("Global AI modules imported successfully")
 except ImportError as e:
-    print(f"⚠️ Global AI components not available (expected after integration): {e}")
+    logger.info(f"Global AI components not available: {e}")
     GLOBAL_AI_AVAILABLE = False
-
-logger = logging.getLogger(__name__)
 
 class CrewAIOrchestrator:
     """CrewAI-based orchestrator replacing Agent Squad"""
@@ -64,19 +64,14 @@ class CrewAIOrchestrator:
                 self.rag_agent = None
                 self.execution_agent = None
         else:
-            logger.warning("⚠️ Global AI components not available")
+            logger.debug("Global AI components not available (fallback disabled)")
             self.intent_agent = None
             self.slot_filling_agent = None
             self.rag_agent = None
             self.execution_agent = None
 
-        # Initialize existing handlers for fallback
-        try:
-            from app.services.ai.global_ai import GlobalAIHandler
-            self.global_handler = GlobalAIHandler(self.supabase, groq_api_key=os.getenv("GROQ_API_KEY"))
-        except ImportError as e:
-            logger.warning(f"⚠️ GlobalAIHandler not available (removed during integration): {e}")
-            self.global_handler = None
+        # No fallback to GlobalAIHandler; set to None
+        self.global_handler = None
 
         # Initialize CrewAI agents
         self._initialize_agents()

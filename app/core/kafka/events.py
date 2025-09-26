@@ -11,7 +11,7 @@ import uuid
 from abc import ABC, abstractmethod
 from datetime import datetime
 from typing import Any, Dict, List, Optional, Type, TypeVar, Generic, Callable, Awaitable
-from dataclasses import dataclass, asdict
+from dataclasses import dataclass, asdict, field
 from enum import Enum
 import logging
 
@@ -51,13 +51,16 @@ class EventPriority(str, Enum):
 @dataclass
 class Event:
     """Base event class for all system events"""
-    
-    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+
+    # Required fields first (no defaults)
     type: EventType
-    timestamp: datetime = Field(default_factory=datetime.utcnow)
     source: str
-    data: Dict[str, Any] = Field(default_factory=dict)
-    metadata: Dict[str, Any] = Field(default_factory=dict)
+
+    # Fields with defaults
+    id: str = field(default_factory=lambda: str(uuid.uuid4()))
+    timestamp: datetime = field(default_factory=datetime.utcnow)
+    data: Dict[str, Any] = field(default_factory=dict)
+    metadata: Dict[str, Any] = field(default_factory=dict)
     priority: EventPriority = EventPriority.NORMAL
     correlation_id: Optional[str] = None
     user_id: Optional[str] = None

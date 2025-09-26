@@ -1,0 +1,302 @@
+[
+  {
+    "message": "Hi, i'd like to make a reservation for tonight",
+    "conversation_history": "",
+    "business_context": "Business category: food_hospitality",
+    "intent": "booking",
+    "confidence": 0.97,
+    "reasoning": "Message contains keywords indicating booking intent",
+    "requires_booking": true,
+    "business_category": "food_hospitality"
+  },
+  {
+    "message": "Hi, book me a haircut for tomorrow",
+    "conversation_history": "",
+    "business_context": "Business category: beauty_personal_care",
+    "intent": "booking",
+    "confidence": 0.86,
+    "reasoning": "Message contains keywords indicating booking intent",
+    "requires_booking": true,
+    "business_category": "beauty_personal_care"
+  },
+  {
+    "message": "I need to schedule an appointment",
+    "conversation_history": "",
+    "business_context": "Business category: beauty_personal_care",
+    "intent": "booking",
+    "confidence": 0.92,
+    "reasoning": "Message contains keywords indicating booking intent",
+    "requires_booking": true,
+    "business_category": "beauty_personal_care"
+  },
+  {
+    "message": "I need to schedule an appointment",
+    "conversation_history": "",
+    "business_context": "Business category: beauty_personal_care",
+    "intent": "booking",
+    "confidence": 0.95,
+    "reasoning": "Message contains keywords indicating booking intent",
+    "requires_booking": true,
+    "business_category": "beauty_personal_care"
+  },
+  {
+    "message": "Hi, i want to reserve a service slot",
+    "conversation_history": "",
+    "business_context": "Business category: local_services",
+    "intent": "booking",
+    "confidence": 0.93,
+    "reasoning": "Message contains keywords indicating booking intent",
+    "requires_booking": true,
+    "business_category": "local_services"
+  },
+  {
+    "message": "Hi, i'd like to make a reservation for tonight",
+    "conversation_history": "",
+    "business_context": "Business category: food_hospitality",
+    "intent": "booking",
+    "confidence": 0.88,
+    "reasoning": "Message contains keywords indicating booking intent",
+    "requires_booking": true,
+    "business_category": "food_hospitality"
+  },
+  {
+    "message": "I'd like to order food for delivery please",
+    "conversation_history": "",
+    "business_context": "Business category: food_hospitality",
+    "intent": "order",
+    "confidence": 0.94,
+    "reasoning": "Message contains keywords indicating order intent",
+    "requires_booking": false,
+    "business_category": "food_hospitality"
+  },
+  {
+    "message": "Can I place an order for pickup? please",
+    "conversation_history": "",
+    "business_context": "Business category: food_hospitality",
+    "intent": "order",
+    "confidence": 0.91,
+    "reasoning": "Message contains keywords indicating order intent",
+    "requires_booking": false,
+    "business_category": "food_hospitality"
+  },
+  {
+    "message": "I'd like to order food for delivery",
+    "conversation_history": "",
+    "business_context": "Business category: food_hospitality",
+    "intent": "order",
+    "confidence": 0.83,
+    "reasoning": "Message contains keywords indicating order intent",
+    "requires_booking": false,
+    "business_category": "food_hospitality"
+  },
+  {
+    "message": "Order me the usual please",
+    "conversation_history": "",
+    "business_context": "Business category: food_hospitality",
+    "intent": "order",
+    "confidence": 0.95,
+    "reasoning": "Message contains keywords indicating order intent",
+    "requires_booking": false,
+    "business_category": "food_hospitality"
+  },
+  {
+    "message": "I'd like to order food for delivery",
+    "conversation_history": "",
+    "business_context": "Business category: food_hospitality",
+    "intent": "order",
+    "confidence": 0.9,
+    "reasoning": "Message contains keywords indicating order intent",
+    "requires_booking": false,
+    "business_category": "food_hospitality"
+  },
+  {
+    "message": "I want to buy some products",
+    "conversation_history": "",
+    "business_context": "Business category: local_services",
+    "intent": "order",
+    "confidence": 0.87,
+    "reasoning": "Message contains keywords indicating order intent",
+    "requires_booking": false,
+    "business_category": "local_services"
+  },
+  {
+    "message": "I'm looking for auto repair shops",
+    "conversation_history": "",
+    "business_context": "Business category: automotive_services",
+    "intent": "discovery",
+    "confidence": 1.0,
+    "reasoning": "Message contains keywords indicating discovery intent",
+    "requires_booking": false,
+    "business_category": "automotive_services"
+  },
+  {
+    "message": "I'm looking for auto repair shops please",
+    "conversation_history": "",
+    "business_context": "Business category: automotive_services",
+    "intent": "discovery",
+    "confidence": 0.98,
+    "reasoning": "Message contains keywords indicating discovery intent",
+    "requires_booking": false,
+    "business_category": "automotive_services"
+  },
+  {
+    "message": "Hi, what services do you offer?",
+    "conversation_history": "",
+    "business_context": "Business category: local_services",
+    "intent": "discovery",
+    "confidence": 0.85,
+    "reasoning": "Message contains keywords indicating discovery intent",
+    "requires_booking": false,
+    "business_category": "local_services"
+  },
+  {
+    "message": "What services do you offer?",
+    "conversation_history": "",
+    "business_context": "Business category: local_services",
+    "intent": "discovery",
+    "confidence": 0.97,
+    "reasoning": "Message contains keywords indicating discovery intent",
+    "requires_booking": false,
+    "business_category": "local_services"
+  },
+  {
+    "message": "What services do you offer?",
+    "conversation_history": "",
+    "business_context": "Business category: local_services",
+    "intent": "discovery",
+    "confidence": 0.85,
+    "reasoning": "Message contains keywords indicating discovery intent",
+    "requires_booking": false,
+    "business_category": "local_services"
+  },
+  {
+    "message": "I'm looking for auto repair shops please",
+    "conversation_history": "",
+    "business_context": "Business category: automotive_services",
+    "intent": "discovery",
+    "confidence": 0.96,
+    "reasoning": "Message contains keywords indicating discovery intent",
+    "requires_booking": false,
+    "business_category": "automotive_services"
+  },
+  {
+    "message": "I need help with something please",
+    "conversation_history": "",
+    "business_context": "Business category: local_services",
+    "intent": "support",
+    "confidence": 0.97,
+    "reasoning": "Message contains keywords indicating support intent",
+    "requires_booking": false,
+    "business_category": "local_services"
+  },
+  {
+    "message": "I have a problem with my order",
+    "conversation_history": "",
+    "business_context": "Business category: food_hospitality",
+    "intent": "support",
+    "confidence": 0.91,
+    "reasoning": "Message contains keywords indicating support intent",
+    "requires_booking": false,
+    "business_category": "food_hospitality"
+  },
+  {
+    "message": "There's an issue with my service",
+    "conversation_history": "",
+    "business_context": "Business category: local_services",
+    "intent": "support",
+    "confidence": 0.96,
+    "reasoning": "Message contains keywords indicating support intent",
+    "requires_booking": false,
+    "business_category": "local_services"
+  },
+  {
+    "message": "My appointment was cancelled",
+    "conversation_history": "",
+    "business_context": "Business category: beauty_personal_care",
+    "intent": "support",
+    "confidence": 0.95,
+    "reasoning": "Message contains keywords indicating support intent",
+    "requires_booking": false,
+    "business_category": "beauty_personal_care"
+  },
+  {
+    "message": "Hi, my appointment was cancelled",
+    "conversation_history": "",
+    "business_context": "Business category: beauty_personal_care",
+    "intent": "support",
+    "confidence": 0.9,
+    "reasoning": "Message contains keywords indicating support intent",
+    "requires_booking": false,
+    "business_category": "beauty_personal_care"
+  },
+  {
+    "message": "My appointment was cancelled please",
+    "conversation_history": "",
+    "business_context": "Business category: beauty_personal_care",
+    "intent": "support",
+    "confidence": 0.98,
+    "reasoning": "Message contains keywords indicating support intent",
+    "requires_booking": false,
+    "business_category": "beauty_personal_care"
+  },
+  {
+    "message": "Hi, hello, how are you?",
+    "conversation_history": "",
+    "business_context": "Business category: local_services",
+    "intent": "general",
+    "confidence": 0.87,
+    "reasoning": "Message contains keywords indicating general intent",
+    "requires_booking": false,
+    "business_category": "local_services"
+  },
+  {
+    "message": "What are your hours?",
+    "conversation_history": "",
+    "business_context": "Business category: local_services",
+    "intent": "general",
+    "confidence": 0.9,
+    "reasoning": "Message contains keywords indicating general intent",
+    "requires_booking": false,
+    "business_category": "local_services"
+  },
+  {
+    "message": "Hello, how are you?",
+    "conversation_history": "",
+    "business_context": "Business category: local_services",
+    "intent": "general",
+    "confidence": 0.97,
+    "reasoning": "Message contains keywords indicating general intent",
+    "requires_booking": false,
+    "business_category": "local_services"
+  },
+  {
+    "message": "Hello, how are you? please",
+    "conversation_history": "",
+    "business_context": "Business category: local_services",
+    "intent": "general",
+    "confidence": 0.96,
+    "reasoning": "Message contains keywords indicating general intent",
+    "requires_booking": false,
+    "business_category": "local_services"
+  },
+  {
+    "message": "Tell me about your business",
+    "conversation_history": "",
+    "business_context": "Business category: local_services",
+    "intent": "general",
+    "confidence": 0.91,
+    "reasoning": "Message contains keywords indicating general intent",
+    "requires_booking": false,
+    "business_category": "local_services"
+  },
+  {
+    "message": "Do you accept credit cards?",
+    "conversation_history": "",
+    "business_context": "Business category: local_services",
+    "intent": "general",
+    "confidence": 0.83,
+    "reasoning": "Message contains keywords indicating general intent",
+    "requires_booking": false,
+    "business_category": "local_services"
+  }
+]

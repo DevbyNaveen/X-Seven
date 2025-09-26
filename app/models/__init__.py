@@ -7,12 +7,12 @@ It also ensures all models are registered with Supabase.
 
 from .base import SupabaseModel
 from .business import Business, SubscriptionPlan, PhoneNumberType, BusinessCategory
-from .user import User
+from .user import User, UserRole
 from .menu_category import MenuCategory
 from .menu_item import MenuItem
-from .order import Order, OrderStatus
+from .order import Order, OrderStatus, PaymentStatus, PaymentMethod
 from .table import Table, TableStatus
-from .phone_number import PhoneNumber
+from .phone_number import PhoneNumber, NumberStatus
 from .service_provider import ServiceProvider
 from .appointment import Appointment
 from .waitlist_entry import WaitlistEntry
@@ -33,13 +33,17 @@ __all__ = [
     "PhoneNumberType",
     "BusinessCategory",
     "User",
+    "UserRole",
     "MenuCategory",
     "MenuItem", 
     "Order",
     "OrderStatus",
+    "PaymentStatus",
+    "PaymentMethod",
     "Table",
     "TableStatus",
     "PhoneNumber",
+    "NumberStatus",
     "ServiceProvider",
     "Appointment",
     "WaitlistEntry",

@@ -100,7 +100,7 @@ async def test_rag(supabase = Depends(get_supabase_client)):
 app.include_router(api_router, prefix=settings.API_V1_STR)
 
 # Include Temporal router
-from app.api.v1.endpoints import temporal as temporal_router
+from app.api.v1.endpoints.temporal import router as temporal_router
 app.include_router(temporal_router, prefix=settings.API_V1_STR, tags=["Temporal"])
 
 # Include Enhanced LangGraph conversation API with full integration

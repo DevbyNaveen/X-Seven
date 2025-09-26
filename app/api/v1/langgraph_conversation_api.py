@@ -8,6 +8,7 @@ from __future__ import annotations
 import asyncio
 import json
 import uuid
+import logging
 from typing import Dict, Any, List, Optional, Union
 from datetime import datetime
 from fastapi import APIRouter, HTTPException, BackgroundTasks, Depends
@@ -15,11 +16,13 @@ from pydantic import BaseModel, Field
 from dataclasses import dataclass
 
 from .conversation_flow_engine import ConversationFlowEngine, ConversationConfig
+# Backward compatibility alias
+ConversationEngine = ConversationFlowEngine
 from .redis_persistence import RedisPersistenceManager
 from .crewai_langgraph_integration import CrewAILangGraphIntegrator
 from .conversation_recovery import ConversationRecoveryManager, ConversationResilienceManager
 from .chat_flow_router import get_chat_flow_router, ChatFlowType
-from ..workflows.temporal_integration import get_temporal_manager
+from app.workflows.temporal_integration import get_temporal_manager
 
 # Import Kafka integration
 from app.core.kafka.integration import (
@@ -58,6 +61,9 @@ dspy_ai_handler = DSPyEnhancedAIHandler()
 
 # FastAPI router
 router = APIRouter(prefix="/api/v1/conversations", tags=["conversations"])
+
+# Logger
+logger = logging.getLogger(__name__)
 
 
 # Pydantic models for request/response
@@ -758,12 +764,14 @@ async def test_dspy_modules(test_message: str = "Hello, I'd like to make a reser
 @router.on_event("startup")
 async def startup_event():
     """Start background tasks on startup"""
-    # Initialize Temporal manager
+    # Initialize Temporal manager with graceful fallback
     try:
         await temporal_manager.initialize()
         logger.info("✅ Temporal manager initialized")
     except Exception as e:
-        logger.error(f"❌ Failed to initialize Temporal: {e}")
+        logger.warning(f"⚠️ Temporal unavailable, continuing without workflow support: {e}")
+        # Set temporal_manager to a mock/disabled state
+        temporal_manager._disabled = True
     
     # Start health monitoring
     asyncio.create_task(health_monitoring_task())

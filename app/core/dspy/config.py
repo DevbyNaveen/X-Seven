@@ -38,6 +38,9 @@ class DSPyManager:
         self.fallback_lm = None
         self.optimization_lm = None
         self._initialized = False
+        # Registry for custom DSPy modules (e.g., voice‑optimized modules)
+        self._module_registry: dict[str, Any] = {}
+
     
     def initialize(self) -> bool:
         """Initialize DSPy with configured LLMs"""
@@ -140,6 +143,20 @@ class DSPyManager:
             raise RuntimeError("DSPy not initialized")
         dspy.configure(lm=self.primary_lm)
         logger.info("🔄 Switched to primary LLM")
+
+    async def register_module(self, name: str, module: Any) -> None:
+        """Register a custom DSPy module (e.g., voice‑optimized module).
+        The method is async to match existing call sites.
+        """
+        if not self._initialized:
+            raise RuntimeError("DSPy not initialized – cannot register modules")
+        self._module_registry[name] = module
+        logger.info(f"✅ DSPy module registered: {name}")
+
+    def get_registered_module(self, name: str) -> Any:
+        """Retrieve a previously registered module by name."""
+        return self._module_registry.get(name)
+
 
 
 # Global DSPy manager instance

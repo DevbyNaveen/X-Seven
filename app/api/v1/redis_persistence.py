@@ -24,9 +24,13 @@ class RedisPersistenceManager:
         self.redis_url = redis_url or settings.REDIS_URL or "redis://localhost:6379"
         self.redis_client: Optional[redis.Redis] = None
         self.connection_pool = None
+        self._disabled = False
         
     async def _ensure_connection(self):
         """Ensure Redis connection is established"""
+        if self._disabled:
+            return None
+            
         if self.redis_client is None:
             try:
                 self.connection_pool = redis.ConnectionPool.from_url(
@@ -41,8 +45,10 @@ class RedisPersistenceManager:
                 logger.info("✅ Redis connection established")
                 
             except Exception as e:
-                logger.error(f"❌ Failed to connect to Redis: {e}")
-                raise
+                logger.warning(f"⚠️ Redis unavailable, persistence disabled: {e}")
+                self._disabled = True
+                self.redis_client = None
+                return None
     
     async def close(self):
         """Close Redis connection"""
@@ -371,36 +377,65 @@ class RedisPersistenceManager:
     
     async def cleanup_expired_keys(self) -> int:
         """Clean up expired conversation keys"""
-        await self._ensure_connection()
-        
-        try:
-            cleaned = 0
-            
-            # Get all active conversations
-            active_conversations = await self.redis_client.smembers("conversations:active")
-            
-            for conversation_id in active_conversations:
-                key = f"conversation:{conversation_id}"
-                exists = await self.redis_client.exists(key)
-                
-                if not exists:
-                    # Remove from active set if key doesn't exist
-                    await self.redis_client.srem("conversations:active", conversation_id)
-                    cleaned += 1
-            
-            logger.info(f"Cleaned up {cleaned} expired conversation keys")
-            return cleaned
-            
-        except Exception as e:
-            logger.error(f"Failed to cleanup expired keys: {e}")
+        if self._disabled:
+            logger.debug("Redis disabled, skipping key cleanup")
             return 0
-    
+            
+        try:
+            await self._ensure_connection()
+            if not self.redis_client:
+                return 0
+                
+            # Clean up expired keys
+            current_time = datetime.now()
+            expired_keys = []
+            
+            # Get all conversation keys
+            keys = await self.redis_client.keys("conversation:*")
+            for key in keys:
+                try:
+                    data = await self.redis_client.get(key)
+                    if data:
+                        conversation_data = json.loads(data)
+                        updated_at = datetime.fromisoformat(conversation_data.get('updated_at', current_time.isoformat()))
+                        
+                        # Check if expired (older than 7 days)
+                        if current_time - updated_at > timedelta(days=7):
+                            expired_keys.append(key)
+                            
+                except Exception as e:
+                    logger.warning(f"Error processing key {key}: {e}")
+            
+            # Delete expired keys
+            if expired_keys:
+                await self.redis_client.delete(*expired_keys)
+                logger.info(f"Cleaned up {len(expired_keys)} expired conversation keys")
+                return len(expired_keys)
+                
+        except Exception as e:
+            logger.warning(f"Failed to cleanup expired keys: {e}")
+            return 0
     # Health Check
     
     async def health_check(self) -> Dict[str, Any]:
         """Perform Redis health check"""
+        if self._disabled:
+            return {
+                "status": "disabled",
+                "connected": False,
+                "message": "Redis persistence disabled",
+                "timestamp": datetime.now().isoformat()
+            }
+            
         try:
             await self._ensure_connection()
+            if not self.redis_client:
+                return {
+                    "status": "unhealthy",
+                    "connected": False,
+                    "error": "Redis client not available",
+                    "timestamp": datetime.now().isoformat()
+                }
             
             # Test basic operations
             test_key = "health_check_test"
@@ -408,25 +443,23 @@ class RedisPersistenceManager:
             value = await self.redis_client.get(test_key)
             await self.redis_client.delete(test_key)
             
-            if value == "ok":
-                return {
-                    "status": "healthy",
-                    "connection": "ok",
-                    "operations": "ok",
-                    "timestamp": datetime.now().isoformat()
-                }
-            else:
-                return {
-                    "status": "unhealthy",
-                    "connection": "ok",
-                    "operations": "failed",
-                    "timestamp": datetime.now().isoformat()
-                }
-                
+            # Get Redis info
+            info = await self.redis_client.info()
+            
+            return {
+                "status": "healthy",
+                "connected": True,
+                "redis_version": info.get("redis_version", "unknown"),
+                "used_memory": info.get("used_memory_human", "unknown"),
+                "connected_clients": info.get("connected_clients", 0),
+                "timestamp": datetime.now().isoformat()
+            }
+            
         except Exception as e:
+            logger.warning(f"Redis health check failed: {e}")
             return {
                 "status": "unhealthy",
-                "connection": "failed",
+                "connected": False,
                 "error": str(e),
                 "timestamp": datetime.now().isoformat()
             }

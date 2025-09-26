@@ -245,15 +245,24 @@ class TemporalVoiceIntegration:
         self.is_initialized = False
     
     async def initialize(self):
-        """Initialize Temporal integration."""
+        """Initialize Temporal integration with readiness check."""
         try:
             from app.workflows.temporal_integration import get_temporal_manager
             self.temporal_manager = get_temporal_manager()
+            # Ensure the Temporal manager is initialized (connects to server)
+            await self.temporal_manager.initialize()
+            # Verify server availability
+            if not await self.temporal_manager.is_ready():
+                logger.warning("⚠️ Temporal server unavailable – TemporalVoiceIntegration disabled")
+                self.is_initialized = False
+                self.temporal_manager = None
+                return
             self.is_initialized = True
-            logger.info("Temporal voice integration initialized")
-            
+            logger.info("✅ Temporal voice integration initialized and ready")
         except Exception as e:
             logger.error(f"Failed to initialize Temporal integration: {e}")
+            self.is_initialized = False
+            self.temporal_manager = None
     
     async def start_voice_workflow(self, message: str, context: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         """Start a Temporal workflow for voice processing."""

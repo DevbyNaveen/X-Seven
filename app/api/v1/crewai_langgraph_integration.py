@@ -15,7 +15,7 @@ import logging
 from app.api.v1.conversation_flow_engine import ConversationFlowEngine, ConversationConfig, ConversationState
 from app.api.v1.redis_persistence import RedisPersistenceManager
 from app.services.ai.crewai_orchestrator import get_crewai_orchestrator
-from app.workflows.temporal_integration import TemporalWorkflowManager
+from app.workflows.temporal_integration import get_temporal_manager
 
 logger = logging.getLogger(__name__)
 
@@ -36,7 +36,7 @@ class CrewAILangGraphIntegrator:
         self.flow_engine = ConversationFlowEngine(self.conversation_config)
         self.redis_manager = RedisPersistenceManager()
         self.crewai_orchestrator = get_crewai_orchestrator()
-        self.temporal_manager = TemporalWorkflowManager()
+        self.temporal_manager = get_temporal_manager()
         
         # Agent mapping for different conversation types
         self.agent_mapping = {
@@ -401,11 +401,15 @@ class CrewAILangGraphIntegrator:
             workflow_data = state.context.get("workflow_data", {})
             
             if workflow_type:
-                workflow_id = await self.temporal_manager.start_workflow(
-                    workflow_type=workflow_type,
-                    workflow_data=workflow_data,
-                    conversation_id=state.conversation_id
-                )
+                if hasattr(self.temporal_manager, 'is_ready') and await self.temporal_manager.is_ready():
+                    workflow_id = await self.temporal_manager.start_workflow(
+                        workflow_type=workflow_type,
+                        workflow_data=workflow_data,
+                        conversation_id=state.conversation_id
+                    )
+                else:
+                    logger.warning("Temporal server unavailable – skipping workflow start")
+                    workflow_id = None
                 
                 # Update state with workflow info
                 state.context["workflow_id"] = workflow_id

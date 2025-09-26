@@ -5,7 +5,8 @@ from . import (
     dedicated_endpoints,
     dashboard_endpoints,
     supabase_auth,
-    analytics_endpoints
+    analytics_endpoints,
+    temporal
 )
 
 __all__ = [
@@ -15,5 +16,6 @@ __all__ = [
     "dedicated_endpoints",
     "dashboard_endpoints",
     "supabase_auth",
-    "analytics_endpoints"
+    "analytics_endpoints",
+    "temporal"
 ]

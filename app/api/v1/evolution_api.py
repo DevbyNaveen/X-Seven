@@ -7,12 +7,12 @@ from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session
 from pydantic import BaseModel, Field
 
-from app.core.database import get_db
+from app.config.database import get_supabase_client
 from app.models.business import Business
 from app.models.evolution_instance import EvolutionInstance, EvolutionMessage
 from app.services.evolution.manager import EvolutionManager, EvolutionManagerError
 from app.services.evolution.webhook_handler import EvolutionWebhookHandler
-from app.core.auth import get_current_business, get_current_user
+from app.core.dependencies import get_current_business, get_current_user
 from app.config.settings import get_settings
 
 logger = logging.getLogger(__name__)
@@ -67,7 +67,7 @@ async def setup_business_evolution(
     business_id: int,
     setup_request: EvolutionSetupRequest,
     background_tasks: BackgroundTasks,
-    db: Session = Depends(get_db),
+    db: Session = Depends(get_supabase_client),
     current_business: Business = Depends(get_current_business)
 ):
     """
@@ -118,7 +118,7 @@ async def setup_business_evolution(
 @router.get("/{business_id}/status", response_model=EvolutionStatusResponse)
 async def get_business_evolution_status(
     business_id: int,
-    db: Session = Depends(get_db),
+    db: Session = Depends(get_supabase_client),
     current_business: Business = Depends(get_current_business)
 ):
     """Get Evolution API status for a business."""
@@ -140,7 +140,7 @@ async def get_business_evolution_status(
 @router.post("/{business_id}/restart")
 async def restart_business_instance(
     business_id: int,
-    db: Session = Depends(get_db),
+    db: Session = Depends(get_supabase_client),
     current_business: Business = Depends(get_current_business)
 ):
     """Restart Evolution API instance for a business."""
@@ -169,7 +169,7 @@ async def restart_business_instance(
 @router.get("/{business_id}/qr-code")
 async def get_whatsapp_qr_code(
     business_id: int,
-    db: Session = Depends(get_db),
+    db: Session = Depends(get_supabase_client),
     current_business: Business = Depends(get_current_business)
 ):
     """Get WhatsApp QR code for business instance."""
@@ -200,7 +200,7 @@ async def get_whatsapp_qr_code(
 async def send_message_to_customer(
     business_id: int,
     message_request: SendMessageRequest,
-    db: Session = Depends(get_db),
+    db: Session = Depends(get_supabase_client),
     current_business: Business = Depends(get_current_business)
 ):
     """Send message to customer via business Evolution instance."""
@@ -232,7 +232,7 @@ async def get_business_messages(
     business_id: int,
     limit: int = 50,
     offset: int = 0,
-    db: Session = Depends(get_db),
+    db: Session = Depends(get_supabase_client),
     current_business: Business = Depends(get_current_business)
 ):
     """Get messages for a business."""
@@ -269,7 +269,7 @@ async def get_business_messages(
 async def get_business_analytics(
     business_id: int,
     days: int = 30,
-    db: Session = Depends(get_db),
+    db: Session = Depends(get_supabase_client),
     current_business: Business = Depends(get_current_business)
 ):
     """Get analytics for a business Evolution instance."""
@@ -301,7 +301,7 @@ async def handle_evolution_webhook(
     instance_name: str,
     request: Request,
     background_tasks: BackgroundTasks,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_supabase_client)
 ):
     """
     Handle incoming webhooks from Evolution API.
@@ -360,7 +360,7 @@ async def process_webhook_background(
 
 @router.get("/admin/instances")
 async def list_all_evolution_instances(
-    db: Session = Depends(get_db),
+    db: Session = Depends(get_supabase_client),
     current_user = Depends(get_current_user)
 ):
     """List all Evolution instances (admin only)."""
@@ -397,7 +397,7 @@ async def list_all_evolution_instances(
 @router.get("/admin/webhook-stats")
 async def get_webhook_statistics(
     days: int = 7,
-    db: Session = Depends(get_db),
+    db: Session = Depends(get_supabase_client),
     current_user = Depends(get_current_user)
 ):
     """Get webhook processing statistics (admin only)."""
@@ -421,9 +421,9 @@ async def get_webhook_statistics(
 
 @router.post("/admin/cleanup-webhooks")
 async def cleanup_old_webhook_events(
-    days: int = 30,
     background_tasks: BackgroundTasks,
-    db: Session = Depends(get_db),
+    days: int = 30,
+    db: Session = Depends(get_supabase_client),
     current_user = Depends(get_current_user)
 ):
     """Clean up old webhook events (admin only)."""
