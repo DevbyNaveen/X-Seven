@@ -173,7 +173,7 @@ async def create_order(
 async def get_orders(
     status: Optional[OrderStatus] = Query(None, description="Filter by order status"),
     order_type: Optional[str] = Query(None, description="Filter by order type"),
-    table_id: Optional[UUID] = Query(None, description="Filter by table ID"),  # Changed to UUID
+    table_id: Optional[UUID] = Query(None, description="Filter by table ID"),
     limit: int = Query(50, ge=1, le=100, description="Number of orders to return"),
     business: Business = Depends(get_current_business),
     supabase = Depends(get_supabase_client)
@@ -182,29 +182,72 @@ async def get_orders(
     Get orders with optional filtering.
     """
     try:
+        print(f"\n=== GET ORDERS REQUEST DEBUG ===")
+        print(f"Business ID: {business.id}")
+        print(f"Status filter: {status}")
+        print(f"Order type filter: {order_type}")
+        print(f"Table ID filter: {table_id}")
+        print(f"Limit: {limit}")
+        
         query = supabase.table('orders').select('*').eq('business_id', business.id)
+        print(f"Initial query created for business_id: {business.id}")
 
         # Apply filters
         if status:
             query = query.eq('status', status.value)
+            print(f"Applied status filter: {status.value}")
         if order_type:
             query = query.eq('order_type', order_type)
+            print(f"Applied order_type filter: {order_type}")
         if table_id:
-            query = query.eq('table_id', str(table_id))  # Convert UUID to string for query
+            query = query.eq('table_id', str(table_id))
+            print(f"Applied table_id filter: {str(table_id)}")
 
         # Order by creation date (newest first)
         response = query.order('created_at', desc=True).limit(limit).execute()
+        
+        print(f"\n--- SUPABASE RESPONSE ---")
+        print(f"Response status: {hasattr(response, 'data')}")
+        print(f"Response data exists: {response.data is not None}")
+        print(f"Number of orders returned: {len(response.data) if response.data else 0}")
+        
+        if response.data:
+            print(f"\n--- SAMPLE ORDER DATA (first order) ---")
+            sample_order = response.data[0]
+            print(f"Order ID: {sample_order.get('id')}")
+            print(f"Business ID: {sample_order.get('business_id')}")
+            print(f"Table ID: {sample_order.get('table_id')}")
+            print(f"Customer Name: {sample_order.get('customer_name')}")
+            print(f"Order Type: {sample_order.get('order_type')}")
+            print(f"Status: {sample_order.get('status')}")
+            print(f"Payment Status: {sample_order.get('payment_status')}")
+            print(f"Total Amount: {sample_order.get('total_amount')}")
+            print(f"Created At: {sample_order.get('created_at')}")
+            print(f"Items Count: {len(sample_order.get('items', []))}")
+            
+            print(f"\n--- ALL ORDER IDs ---")
+            for i, order in enumerate(response.data):
+                print(f"{i+1}. Order ID: {order.get('id')}, Status: {order.get('status')}, Total: {order.get('total_amount')}")
+        else:
+            print("No orders found in response")
+            
+        print(f"\n--- RETURNING DATA ---")
+        return_data = response.data if response.data else []
+        print(f"Returning {len(return_data)} orders")
+        print(f"=== END GET ORDERS DEBUG ===\n")
 
-        return response.data if response.data else []
+        return return_data
 
     except Exception as e:
+        print(f"\n!!! ERROR in get_orders !!!")
+        print(f"Error type: {type(e).__name__}")
+        print(f"Error message: {str(e)}")
+        print(f"Business ID: {business.id if 'business' in locals() else 'Not available'}")
         logger.error(f"Error retrieving orders: {str(e)}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to retrieve orders: {str(e)}"
         )
-
-
 @router.get("/active", response_model=List[OrderResponse])
 async def get_active_orders(
     business: Business = Depends(get_current_business),

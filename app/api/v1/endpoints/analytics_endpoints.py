@@ -13,7 +13,7 @@ router = APIRouter(tags=["Analytics"])
 
 @router.get("/orders/{business_id}", response_model=Dict[str, Any])
 async def get_orders_analytics(
-    business_id: int,
+    business_id: str,
     period: str = Query("7d", description="Time period: 1d, 7d, 30d"),
     status_filter: Optional[str] = Query(None, description="Filter by order status"),
     start_date: Optional[str] = Query(None, description="Start date (ISO format)"),
@@ -24,7 +24,7 @@ async def get_orders_analytics(
     """Get comprehensive orders analytics with filtering options."""
 
     # Verify business access
-    if current_business.id != business_id:
+    if str(current_business.id) != business_id:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Not authorized to access this business analytics"
@@ -42,7 +42,7 @@ async def get_orders_analytics(
 
 @router.get("/messages/{business_id}", response_model=Dict[str, Any])
 async def get_messages_analytics(
-    business_id: int,
+    business_id: str,
     period: str = Query("7d", description="Time period: 1d, 7d, 30d"),
     session_id: Optional[str] = Query(None, description="Filter by session ID"),
     start_date: Optional[str] = Query(None, description="Start date (ISO format)"),
@@ -53,7 +53,7 @@ async def get_messages_analytics(
     """Get comprehensive messages analytics with filtering options."""
 
     # Verify business access
-    if current_business.id != business_id:
+    if str(current_business.id) != business_id:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Not authorized to access this business analytics"
@@ -71,7 +71,7 @@ async def get_messages_analytics(
 
 @router.get("/combined/{business_id}", response_model=Dict[str, Any])
 async def get_combined_analytics(
-    business_id: int,
+    business_id: str,
     period: str = Query("7d", description="Time period: 1d, 7d, 30d"),
     current_business: Business = Depends(get_current_business),
     current_user: User = Depends(get_current_user)
@@ -79,7 +79,7 @@ async def get_combined_analytics(
     """Get combined analytics from both orders and messages."""
 
     # Verify business access
-    if current_business.id != business_id:
+    if str(current_business.id) != business_id:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Not authorized to access this business analytics"
@@ -94,7 +94,7 @@ async def get_combined_analytics(
 
 @router.post("/orders/{business_id}", response_model=Dict[str, Any])
 async def create_order_record(
-    business_id: int,
+    business_id: str,
     order_data: Dict[str, Any],
     current_business: Business = Depends(get_current_business),
     current_user: User = Depends(get_current_user)
@@ -102,7 +102,7 @@ async def create_order_record(
     """Create a new order record for analytics tracking."""
 
     # Verify business access
-    if current_business.id != business_id:
+    if str(current_business.id) != business_id:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Not authorized to create orders for this business"
@@ -117,7 +117,7 @@ async def create_order_record(
 
 @router.put("/orders/{business_id}/{order_id}/status", response_model=Dict[str, Any])
 async def update_order_status(
-    business_id: int,
+    business_id: str,
     order_id: str,
     status_update: Dict[str, Any],
     current_business: Business = Depends(get_current_business),
@@ -126,7 +126,7 @@ async def update_order_status(
     """Update order status for analytics tracking."""
 
     # Verify business access
-    if current_business.id != business_id:
+    if str(current_business.id) != business_id:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Not authorized to update orders for this business"
@@ -149,7 +149,7 @@ async def update_order_status(
 
 @router.post("/messages/{business_id}", response_model=Dict[str, Any])
 async def create_message_record(
-    business_id: int,
+    business_id: str,
     message_data: Dict[str, Any],
     current_business: Business = Depends(get_current_business),
     current_user: User = Depends(get_current_user)
@@ -157,7 +157,7 @@ async def create_message_record(
     """Create a new message record for analytics tracking."""
 
     # Verify business access
-    if current_business.id != business_id:
+    if str(current_business.id) != business_id:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Not authorized to create messages for this business"
@@ -181,14 +181,14 @@ async def create_message_record(
 
 @router.get("/dashboard/{business_id}/summary", response_model=Dict[str, Any])
 async def get_dashboard_summary(
-    business_id: int,
+    business_id: str,
     current_business: Business = Depends(get_current_business),
     current_user: User = Depends(get_current_user)
 ) -> Any:
     """Get dashboard summary with key metrics for quick overview."""
 
     # Verify business access
-    if current_business.id != business_id:
+    if str(current_business.id) != business_id:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Not authorized to access this business analytics"
@@ -237,7 +237,7 @@ async def get_dashboard_summary(
 
 @router.get("/orders/{business_id}/export", response_model=Dict[str, Any])
 async def export_orders_data(
-    business_id: int,
+    business_id: str,
     period: str = Query("30d", description="Time period to export"),
     format: str = Query("json", description="Export format: json, csv"),
     current_business: Business = Depends(get_current_business),
@@ -246,7 +246,7 @@ async def export_orders_data(
     """Export orders data for external analysis."""
 
     # Verify business access
-    if current_business.id != business_id:
+    if str(current_business.id) != business_id:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Not authorized to export data for this business"
@@ -269,7 +269,7 @@ async def export_orders_data(
 
 @router.get("/messages/{business_id}/export", response_model=Dict[str, Any])
 async def export_messages_data(
-    business_id: int,
+    business_id: str,
     period: str = Query("30d", description="Time period to export"),
     format: str = Query("json", description="Export format: json, csv"),
     current_business: Business = Depends(get_current_business),
@@ -278,7 +278,7 @@ async def export_messages_data(
     """Export messages data for external analysis."""
 
     # Verify business access
-    if current_business.id != business_id:
+    if str(current_business.id) != business_id:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Not authorized to export data for this business"
