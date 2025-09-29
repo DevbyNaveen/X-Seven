@@ -6,7 +6,6 @@ email-validator==2.1.0
 python-multipart==0.0.6
 
 # Database
-supabase==2.3.1
 
 # Authentication & Security
 python-jose[cryptography]==3.3.0
@@ -18,7 +17,9 @@ celery==5.3.4
 redis==5.0.1
 
 # HTTP Client - Fixed for supabase compatibility
-httpx==0.24.1
+supabase==2.7.4
+httpx==0.26.0
+gotrue==2.8.0
 
 # AI & LLM (without heavy ML dependencies)
 openai==1.12.0
