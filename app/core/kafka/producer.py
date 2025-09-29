@@ -44,15 +44,14 @@ class KafkaProducer:
             'bootstrap_servers': self.bootstrap_servers,
             'security_protocol': settings.KAFKA_SECURITY_PROTOCOL,
             'acks': settings.KAFKA_PRODUCER_ACKS,
-            'retries': settings.KAFKA_PRODUCER_RETRIES,
-            'batch_size': settings.KAFKA_PRODUCER_BATCH_SIZE,
+            'max_batch_size': settings.KAFKA_PRODUCER_BATCH_SIZE,
             'linger_ms': settings.KAFKA_PRODUCER_LINGER_MS,
             'compression_type': settings.KAFKA_PRODUCER_COMPRESSION_TYPE,
             'max_request_size': settings.KAFKA_PRODUCER_MAX_REQUEST_SIZE,
             'enable_idempotence': True,  # Exactly-once semantics
             'transactional_id': f'xseven-producer-{uuid.uuid4().hex[:8]}',
             'request_timeout_ms': 30000,
-            'delivery_timeout_ms': 120000,
+            'transaction_timeout_ms': 120000,
         }
         
         # Add security configuration if needed
@@ -90,9 +89,8 @@ class KafkaProducer:
             self.producer = AIOKafkaProducer(**self.config)
             await self.producer.start()
             
-            # Initialize transactions
-            await self.producer.init_transactions()
-            
+            # Note: init_transactions is not available in aiokafka 0.12.0
+            # Transactions are handled automatically when transactional_id is provided
             self._running = True
             self.logger.info("✅ Kafka Producer started successfully")
             
@@ -269,6 +267,9 @@ class KafkaProducer:
         
         if self._transaction_active:
             raise RuntimeError("Transaction already active")
+        
+        if not self.config.get('transactional_id'):
+            raise RuntimeError("Transactional producer not configured")
         
         try:
             await self.producer.begin_transaction()

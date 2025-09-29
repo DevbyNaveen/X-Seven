@@ -134,145 +134,115 @@ from app.api.v1.chat_flow_router import get_chat_flow_router
 chat_router = get_chat_flow_router()
 
 
-# Enhanced startup event
+# Modern Service Mesh Integration
 @app.on_event("startup")
 async def startup_event():
-    """Run on application startup with enhanced framework initialization."""
-    logger.info(f"🚀 Starting Enhanced {settings.PROJECT_NAME} v{settings.VERSION}")
+    """Initialize service mesh with modern dependency management"""
+    logger.info(f"🚀 Starting Service Mesh-Enhanced {settings.PROJECT_NAME} v{settings.VERSION}")
     logger.info(f"Environment: {settings.ENVIRONMENT}")
     logger.info(f"Debug mode: {settings.DEBUG}")
-    logger.info("WebSocket support enabled")
+    
+    try:
+        from app.core.service_mesh.integrations import get_service_mesh
+        service_mesh = await get_service_mesh()
+        
+        # Initialize service mesh
+        results = await service_mesh.initialize()
+        
+        if results["success"]:
+            logger.info("✅ Service Mesh initialized successfully")
+            
+            # Log individual service statuses
+            for service_name, status in results.get("services", {}).items():
+                if status.get("status") == "success":
+                    logger.info(f"✅ {service_name}: ACTIVE")
+                else:
+                    logger.warning(f"⚠️ {service_name}: {status.get('error', 'Unknown error')}")
+            
+            logger.info("🎯 Modern Service Mesh: READY FOR PRODUCTION")
+            
+        else:
+            logger.error("❌ Service Mesh initialization failed")
+            # Don't raise exception to allow graceful degradation
+            
+    except Exception as e:
+        logger.error(f"❌ Service Mesh startup error: {e}")
+        # Continue with basic startup for backward compatibility
+        await _legacy_startup()
+
+
+async def _legacy_startup():
+    """Legacy startup for backward compatibility"""
+    logger.info("🔄 Falling back to legacy startup...")
     
     # Initialize Kafka integration
+    from app.core.kafka.integration import initialize_kafka_integration
+    from app.config.database import get_supabase_client
+    
     try:
-        from app.core.kafka.integration import initialize_kafka_integration
-        from app.config.database import get_supabase_client
-        
-        # Get dependencies
         supabase_client = get_supabase_client()
-        
-        # Initialize Kafka with service integrations
-        kafka_integrator = await initialize_kafka_integration(
-            supabase_client=supabase_client
-        )
-        
-        logger.info("✅ Kafka event streaming: ACTIVE")
-        logger.info("✅ Event-driven architecture: ACTIVE")
-        logger.info("✅ Dead letter queue: ACTIVE")
-        logger.info("✅ Kafka monitoring: ACTIVE")
-        
+        await initialize_kafka_integration(supabase_client=supabase_client)
+        logger.info("✅ Legacy services initialized")
     except Exception as e:
-        logger.warning(f"⚠️ Kafka initialization failed (continuing without Kafka): {e}")
-    
-    # Initialize DSPy system
-    try:
-        from app.core.dspy.startup import startup_dspy_system
-        dspy_results = await startup_dspy_system()
-        
-        if dspy_results["success"]:
-            logger.info("✅ DSPy prompt optimization: ACTIVE")
-            logger.info("✅ DSPy intent detection: ACTIVE")
-            logger.info("✅ DSPy agent routing: ACTIVE")
-            logger.info("✅ DSPy response generation: ACTIVE")
-        else:
-            logger.warning("⚠️ DSPy system initialized with issues:")
-            for error in dspy_results["errors"]:
-                logger.warning(f"   - {error}")
-                
-    except Exception as e:
-        logger.warning(f"⚠️ DSPy initialization failed (continuing without DSPy): {e}")
-    
-    # Initialize PipeCat Voice AI System
-    try:
-        from app.core.voice.integration_manager import initialize_voice_integration
-        from app.core.voice.analytics import initialize_voice_analytics
-        from app.core.dspy.modules.voice_optimized_modules import register_voice_modules_with_dspy_manager
-        
-        # Initialize voice integration
-        voice_success = await initialize_voice_integration()
-        if voice_success:
-            logger.info("✅ PipeCat voice pipeline: ACTIVE")
-            logger.info("✅ Voice-LangGraph integration: ACTIVE")
-            logger.info("✅ Voice-Temporal workflows: ACTIVE")
-            logger.info("✅ Voice-CrewAI coordination: ACTIVE")
-            
-            # Register voice-optimized DSPy modules
-            dspy_voice_success = await register_voice_modules_with_dspy_manager()
-            if dspy_voice_success:
-                logger.info("✅ DSPy voice optimization: ACTIVE")
-            else:
-                logger.warning("⚠️ DSPy voice modules registration failed")
-            
-            # Initialize voice analytics
-            analytics_success = await initialize_voice_analytics()
-            if analytics_success:
-                logger.info("✅ Voice analytics & monitoring: ACTIVE")
-            else:
-                logger.warning("⚠️ Voice analytics initialization failed")
-                
-        else:
-            logger.warning("⚠️ PipeCat voice integration failed to initialize")
-            
-    except Exception as e:
-        logger.warning(f"⚠️ PipeCat voice system initialization failed (continuing without voice): {e}")
-    
-    # Enhanced framework components
-    logger.info("✅ LangGraph conversation flows: ACTIVE")
-    logger.info("✅ CrewAI multi-agent orchestration: ACTIVE")
-    logger.info("✅ Temporal workflow engine: INITIALIZING")
-    logger.info("✅ Redis state management: ACTIVE")
-    logger.info("✅ Chat flow router (3 types): ACTIVE")
-    logger.info("✅ Error recovery & resilience: ACTIVE")
-    
-    logger.info("🎯 PipeCat-Enhanced X-SevenAI Framework: READY FOR PRODUCTION")
+        logger.warning(f"⚠️ Legacy initialization warning: {e}")
 
 
-# Enhanced shutdown event
+# Modern Service Mesh Shutdown
 @app.on_event("shutdown")
 async def shutdown_event():
-    """Run on application shutdown with cleanup."""
-    logger.info("🛑 Shutting down Enhanced X-SevenAI Framework")
+    """Graceful shutdown with service mesh"""
+    logger.info("🛑 Shutting down Service Mesh-Enhanced X-SevenAI Framework")
     
     try:
-        # Cleanup Kafka components
+        from app.core.service_mesh.integrations import get_service_mesh
+        service_mesh = await get_service_mesh()
+        
+        # Graceful shutdown through service mesh
+        shutdown_results = await service_mesh.shutdown()
+        
+        if shutdown_results["success"]:
+            logger.info(f"✅ Service Mesh shutdown completed in {shutdown_results.get('duration', 0):.2f}s")
+        else:
+            logger.error("❌ Service Mesh shutdown failed")
+            
+        # Legacy cleanup for backward compatibility
+        await _legacy_cleanup()
+        
+    except Exception as e:
+        logger.error(f"❌ Service Mesh shutdown error: {e}")
+        await _legacy_cleanup()
+    
+    logger.info("✅ Framework shutdown complete")
+
+
+async def _legacy_cleanup():
+    """Legacy cleanup for backward compatibility"""
+    try:
+        # Cleanup Kafka
         try:
             from app.core.kafka.manager import cleanup_kafka_manager
             await cleanup_kafka_manager()
-            logger.info("✅ Kafka connections closed")
+            logger.info("✅ Legacy Kafka cleanup completed")
         except Exception as e:
-            logger.error(f"❌ Error closing Kafka connections: {e}")
+            logger.warning(f"⚠️ Legacy Kafka cleanup warning: {e}")
         
-        # Cleanup enhanced components
-        from app.api.v1.redis_persistence import RedisPersistenceManager
-        from app.workflows.temporal_integration import get_temporal_manager
-        
-        # Close Redis connections
-        redis_manager = RedisPersistenceManager()
-        await redis_manager.close()
-        logger.info("✅ Redis connections closed")
-        
-        # Close Temporal connections
-        temporal_manager = get_temporal_manager()
-        await temporal_manager.close()
-        logger.info("✅ Temporal connections closed")
-        
-        # Cleanup PipeCat Voice System
+        # Cleanup Redis
         try:
-            from app.core.voice.integration_manager import stop_voice_integration
-            from app.core.voice.analytics import cleanup_voice_analytics
-            
-            # Stop voice integration
-            await stop_voice_integration()
-            logger.info("✅ PipeCat voice system stopped")
-            
-            # Cleanup voice analytics
-            await cleanup_voice_analytics()
-            logger.info("✅ Voice analytics cleaned up")
-            
+            from app.api.v1.redis_persistence import RedisPersistenceManager
+            redis_manager = RedisPersistenceManager()
+            await redis_manager.close()
+            logger.info("✅ Legacy Redis cleanup completed")
         except Exception as e:
-            logger.error(f"❌ Error cleaning up voice system: {e}")
+            logger.warning(f"⚠️ Legacy Redis cleanup warning: {e}")
         
+        # Cleanup Temporal
+        try:
+            from app.workflows.temporal_integration import get_temporal_manager
+            temporal_manager = get_temporal_manager()
+            await temporal_manager.close()
+            logger.info("✅ Legacy Temporal cleanup completed")
+        except Exception as e:
+            logger.warning(f"⚠️ Legacy Temporal cleanup warning: {e}")
+            
     except Exception as e:
-        logger.error(f"❌ Error during shutdown: {e}")
-    
-    logger.info("✅ PipeCat-Enhanced framework shutdown complete")
+        logger.error(f"❌ Legacy cleanup error: {e}")

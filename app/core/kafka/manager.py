@@ -55,51 +55,35 @@ class KafkaManager:
         self.logger = logging.getLogger(__name__)
     
     async def initialize(self) -> None:
-        """Initialize Kafka manager with retry logic"""
+        """Initialize Kafka manager - fail fast for production"""
         if self._initialized:
             return
 
-        max_retries = 3
-        retry_delay = 5  # seconds
+        self.logger.info("🚀 Initializing Kafka Manager...")
 
-        for attempt in range(max_retries):
-            try:
-                self.logger.info(f"🚀 Initializing Kafka Manager... (attempt {attempt + 1}/{max_retries})")
+        # Initialize admin client
+        await self._init_admin_client()
 
-                # Initialize admin client
-                await self._init_admin_client()
+        # Create topics
+        await self._create_topics()
 
-                # Create topics
-                await self._create_topics()
+        # Initialize event bus
+        self.event_bus = EventBus()
+        await self.event_bus.start()
 
-                # Initialize event bus
-                self.event_bus = EventBus()
-                await self.event_bus.start()
+        # Initialize producer
+        self.producer = KafkaProducer(self.event_bus)
+        await self.producer.start()
 
-                # Initialize producer
-                self.producer = KafkaProducer(self.event_bus)
-                await self.producer.start()
+        # Initialize monitoring
+        self.monitor = KafkaMonitor()
+        await self.monitor.start()
 
-                # Initialize monitoring
-                self.monitor = KafkaMonitor()
-                await self.monitor.start()
+        # Initialize health check
+        self.health_check = KafkaHealthCheck(self)
 
-                # Initialize health check
-                self.health_check = KafkaHealthCheck(self)
-
-                self._initialized = True
-                self.logger.info("✅ Kafka Manager initialized successfully")
-                return
-
-            except Exception as e:
-                self.logger.warning(f"❌ Failed to initialize Kafka Manager (attempt {attempt + 1}): {e}")
-                if attempt < max_retries - 1:
-                    self.logger.info(f"Retrying in {retry_delay} seconds...")
-                    await asyncio.sleep(retry_delay)
-        
-        # If we reach here, all attempts failed
-        self.logger.error("❌ All retry attempts failed. Kafka Manager will be disabled.")
-        raise RuntimeError("Failed to initialize Kafka Manager after all retry attempts")
+        self._initialized = True
+        self.logger.info("✅ Kafka Manager initialized successfully")
     
     async def health_check_and_reconnect(self) -> bool:
         """Perform health check and attempt to reconnect if Kafka is down"""
@@ -107,7 +91,7 @@ class KafkaManager:
             return False
 
         try:
-            is_healthy = await self.health_check.perform_check()
+            is_healthy, _ = await self.health_check.get_readiness_status()
             if is_healthy and not self._initialized:
                 self.logger.info("Kafka is now available, attempting to reinitialize...")
                 await self.initialize()

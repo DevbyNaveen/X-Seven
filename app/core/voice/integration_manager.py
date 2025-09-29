@@ -38,13 +38,30 @@ class VoiceIntegrationManager:
     async def initialize(self) -> bool:
         """Initialize all voice integrations."""
         try:
-            # Initialize voice pipeline
+            # Check if PipeCat is available
+            try:
+                from .voice_pipeline import PIPECAT_AVAILABLE
+                pipecat_available = PIPECAT_AVAILABLE
+            except ImportError:
+                pipecat_available = False
+            
+            if not pipecat_available:
+                logger.warning("PipeCat AI is not available. Voice functionality will be limited.")
+                # Continue initialization with limited functionality
+                self.voice_pipeline = None
+                # Still initialize other integrations for basic voice handling
+                await self._initialize_integrations()
+                self.is_initialized = True
+                return True
+            
+            # Initialize voice pipeline if PipeCat is available
             self.voice_pipeline = VoicePipeline(self.config)
             pipeline_success = await self.voice_pipeline.initialize()
             
             if not pipeline_success:
                 logger.error("Failed to initialize voice pipeline")
-                return False
+                # Continue with limited functionality
+                self.voice_pipeline = None
             
             # Initialize integrations
             await self._initialize_integrations()
@@ -159,18 +176,73 @@ class VoiceIntegrationManager:
     async def process_voice_call(self, session_id: str, call_data: Dict[str, Any]) -> Dict[str, Any]:
         """Process a voice call through the integrated system."""
         if not self.voice_pipeline:
+            # Graceful fallback when PipeCat is not available
+            logger.info(f"Processing voice call {session_id} without PipeCat")
+            
+            # Extract message if available
+            message = ""
+            if isinstance(call_data, dict):
+                message = call_data.get("message", "")
+                if not message and "data" in call_data and isinstance(call_data["data"], dict):
+                    message = call_data["data"].get("message", "")
+            
+            # Process through available integrations
+            response = "I've received your message."
+            
+            # Try LangGraph integration first
+            if self.langgraph_integration:
+                try:
+                    response = await self.langgraph_integration.process_voice_message(message, call_data)
+                except Exception as e:
+                    logger.warning(f"LangGraph voice processing failed: {e}")
+            
+            # Try CrewAI integration as fallback
+            elif self.crewai_integration:
+                try:
+                    response = await self.crewai_integration.coordinate_voice_agents(message, call_data)
+                except Exception as e:
+                    logger.warning(f"CrewAI voice processing failed: {e}")
+            
+            # Try DSPy integration for optimization
+            if self.dspy_integration:
+                try:
+                    response = await self.dspy_integration.optimize_voice_response(response, call_data)
+                except Exception as e:
+                    logger.warning(f"DSPy voice optimization failed: {e}")
+            
+            # Start a workflow if temporal integration is available
+            if self.temporal_integration:
+                try:
+                    # Use a try-except block to handle any parameter mismatches
+                    workflow_result = await self.temporal_integration.start_voice_workflow(message, call_data)
+                    if workflow_result and isinstance(workflow_result, dict):
+                        response += f" (Workflow ID: {workflow_result.get('workflow_id', 'unknown')})"
+                except Exception as e:
+                    logger.warning(f"Temporal workflow start failed: {e}")
+            
             return {
-                "success": False,
-                "error": "Voice pipeline not available",
-                "session_id": session_id
+                "success": True,
+                "message": response,
+                "session_id": session_id,
+                "using_fallback": True,
+                "timestamp": datetime.now().isoformat()
             }
         
+        # Use PipeCat if available
         return await self.voice_pipeline.process_voice_call(session_id, call_data)
     
     def get_system_status(self) -> Dict[str, Any]:
         """Get the status of the voice integration system."""
+        # Check if PipeCat is available
+        try:
+            from .voice_pipeline import PIPECAT_AVAILABLE
+            pipecat_available = PIPECAT_AVAILABLE
+        except ImportError:
+            pipecat_available = False
+            
         status = {
             "initialized": self.is_initialized,
+            "pipecat_available": pipecat_available,
             "pipeline_running": self.voice_pipeline.is_running if self.voice_pipeline else False,
             "integrations": {
                 "langgraph": self.langgraph_integration is not None,
@@ -178,8 +250,14 @@ class VoiceIntegrationManager:
                 "crewai": self.crewai_integration is not None,
                 "dspy": self.dspy_integration is not None,
             },
-            "metrics": self.voice_pipeline.get_metrics() if self.voice_pipeline else {},
+            "metrics": self.voice_pipeline.get_metrics() if self.voice_pipeline else {
+                "call_count": 0,
+                "active_calls": 0,
+                "error_rate": 0.0,
+                "timestamp": datetime.now().isoformat()
+            },
             "active_sessions": len(self.voice_pipeline.get_active_sessions()) if self.voice_pipeline else 0,
+            "fallback_mode": self.voice_pipeline is None and self.is_initialized,
         }
         
         return status
@@ -271,26 +349,54 @@ class TemporalVoiceIntegration:
         
         try:
             # Create voice workflow context
+            from datetime import datetime
+            current_time = datetime.now()
+            
             workflow_context = {
                 "type": "voice_interaction",
                 "message": message,
-                "timestamp": datetime.now().isoformat(),
+                "timestamp": current_time.isoformat(),
                 **(context or {})
             }
             
             # Start workflow
-            workflow_id = f"voice_workflow_{datetime.now().timestamp()}"
-            result = await self.temporal_manager.start_workflow(
-                workflow_id=workflow_id,
-                workflow_type="voice_processing",
-                context=workflow_context
-            )
+            workflow_id = f"voice_workflow_{current_time.timestamp()}"
             
-            return {
-                "success": True,
-                "workflow_id": workflow_id,
-                "result": result
-            }
+            # Check the method signature to ensure we call it correctly
+            if hasattr(self.temporal_manager, "start_workflow") and callable(self.temporal_manager.start_workflow):
+                # Get the parameter names from the function signature
+                import inspect
+                sig = inspect.signature(self.temporal_manager.start_workflow)
+                params = list(sig.parameters.keys())
+                
+                # Adjust parameters based on the actual signature
+                if "workflow_type" in params and "workflow_data" in params:
+                    # New signature format from our fix
+                    result = await self.temporal_manager.start_workflow(
+                        workflow_type="voice_processing",
+                        workflow_data=workflow_context,
+                        conversation_id=str(workflow_id)
+                    )
+                else:
+                    # Legacy format
+                    result = await self.temporal_manager.start_workflow(
+                        workflow_id=workflow_id,
+                        workflow_type="voice_processing",
+                        context=workflow_context
+                    )
+                
+                return {
+                    "success": True,
+                    "workflow_id": workflow_id,
+                    "result": result
+                }
+            else:
+                logger.warning("Temporal manager does not have start_workflow method")
+                return {
+                    "success": False,
+                    "error": "Temporal manager lacks start_workflow method",
+                    "workflow_id": workflow_id
+                }
             
         except Exception as e:
             logger.error(f"Error starting Temporal voice workflow: {e}")

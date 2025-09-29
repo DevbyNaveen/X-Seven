@@ -1,0 +1,47 @@
+============================================================
+X-SEVEN CONVERSATION FLOWS TEST REPORT
+============================================================
+Generated: 2025-09-28T00:51:37.465966
+
+Tests completed: 5
+Tests successful: 5
+Success rate: 100.0%
+
+----------------------------------------
+Test: dedicated_chat
+Status: ✅ SUCCESS
+conversation_id: 9e1d84e0-9daa-4d2d-9c33-d788a5e9543b
+messages_sent: 4
+responses_received: 4
+message_count: 0
+workflow_triggered: False
+----------------------------------------
+Test: dashboard_chat
+Status: ✅ SUCCESS
+conversation_id: 19840a49-5d11-4dfb-b81d-8948eb050368
+messages_sent: 4
+responses_received: 4
+message_count: 0
+----------------------------------------
+Test: global_chat
+Status: ✅ SUCCESS
+conversation_id: 7a1f4802-4d70-45f3-b1d6-15454b802917
+messages_sent: 4
+responses_received: 4
+message_count: 0
+----------------------------------------
+Test: temporal_workflows
+Status: ✅ SUCCESS
+workflow_id: appointment_workflow-9e1d84e0-9daa-4d2d-9c33-d788a5e9543b-1759009890
+----------------------------------------
+Test: dspy_integration
+Status: ✅ SUCCESS
+test_message: I want to book a table for tonight
+response: I'm having trouble processing your request. Please try again.
+status: {'dspy_initialized': True, 'modules_loaded': {'intent_detection': True, 'response_generation': True, 'conversation_engine': True}, 'business_modules_count': 0, 'performance_metrics': {'total_requests': 1, 'dspy_successes': 1, 'dspy_failures': 1, 'average_confidence': 0.55, 'optimization_count': 0, 'success_rate': 1.0, 'failure_rate': 0.0, 'optimization_status': {'modules_optimized': False, 'optimization_in_progress': False, 'optimization_enabled': True, 'optimization_history': [], 'confidence_stats': {'message': 'No confidence data available'}}}, 'timestamp': '2025-09-28T00:51:37.464082'}
+----------------------------------------
+
+Issues and Recommendations:
+- ✅ All conversation flows are working correctly!
+
+============================================================

@@ -28,15 +28,15 @@ class RedisPersistenceManager:
         
     async def _ensure_connection(self):
         """Ensure Redis connection is established"""
-        if self._disabled:
-            return None
-            
         if self.redis_client is None:
             try:
                 self.connection_pool = redis.ConnectionPool.from_url(
                     self.redis_url,
                     decode_responses=True,
-                    max_connections=20
+                    max_connections=20,
+                    retry_on_timeout=True,
+                    socket_connect_timeout=5.0,  # Short timeout for initial connection
+                    health_check_interval=30.0   # Check connection health periodically
                 )
                 self.redis_client = redis.Redis(connection_pool=self.connection_pool)
                 
@@ -45,10 +45,17 @@ class RedisPersistenceManager:
                 logger.info("✅ Redis connection established")
                 
             except Exception as e:
-                logger.warning(f"⚠️ Redis unavailable, persistence disabled: {e}")
-                self._disabled = True
+                logger.error(f"❌ Redis connection failed: {e}")
                 self.redis_client = None
-                return None
+                raise RuntimeError(f"Failed to connect to Redis: {e}")
+            
+        # Verify connection is still active
+        try:
+            await self.redis_client.ping()
+        except Exception as e:
+            logger.error(f"❌ Redis connection lost: {e}")
+            self.redis_client = None
+            raise RuntimeError(f"Lost connection to Redis: {e}")
     
     async def close(self):
         """Close Redis connection"""
@@ -377,14 +384,8 @@ class RedisPersistenceManager:
     
     async def cleanup_expired_keys(self) -> int:
         """Clean up expired conversation keys"""
-        if self._disabled:
-            logger.debug("Redis disabled, skipping key cleanup")
-            return 0
-            
         try:
             await self._ensure_connection()
-            if not self.redis_client:
-                return 0
                 
             # Clean up expired keys
             current_time = datetime.now()
@@ -419,23 +420,9 @@ class RedisPersistenceManager:
     
     async def health_check(self) -> Dict[str, Any]:
         """Perform Redis health check"""
-        if self._disabled:
-            return {
-                "status": "disabled",
-                "connected": False,
-                "message": "Redis persistence disabled",
-                "timestamp": datetime.now().isoformat()
-            }
-            
         try:
             await self._ensure_connection()
-            if not self.redis_client:
-                return {
-                    "status": "unhealthy",
-                    "connected": False,
-                    "error": "Redis client not available",
-                    "timestamp": datetime.now().isoformat()
-                }
+            # Redis client must be available at this point
             
             # Test basic operations
             test_key = "health_check_test"

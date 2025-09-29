@@ -191,9 +191,11 @@ def get_dspy_manager() -> DSPyManager:
 
 def initialize_dspy() -> bool:
     """Initialize DSPy system"""
-    try:
-        manager = get_dspy_manager()
-        return manager._initialized
-    except Exception as e:
-        logger.error(f"Failed to initialize DSPy: {e}")
-        return False
+    manager = get_dspy_manager()
+    
+    if not manager._initialized:
+        error_msg = "DSPy manager failed to initialize properly"
+        logger.error(error_msg)
+        raise RuntimeError(error_msg)
+        
+    return True

@@ -19,7 +19,7 @@ from .consumer import KafkaConsumer
 logger = logging.getLogger(__name__)
 
 
-# Global flag indicating whether Kafka is available
+# Kafka is mandatory for production - no graceful fallback
 _KAFKA_ENABLED = True
 
 class ConversationEventIntegration(EventHandler):
@@ -281,54 +281,40 @@ class KafkaServiceIntegrator:
         cost_tracker=None,
         dashboard_service=None
     ) -> None:
-        """Initialize the service integrator and attempt to connect to Kafka.
-        If the connection fails, set the global _KAFKA_ENABLED flag to False so the rest of the
-        system can continue operating without Kafka.
-        """
-        global _KAFKA_ENABLED  # Declare global at the top of the function
-        # Attempt to connect to Kafka
-        try:
-            self.logger.info("🚀 Initializing Kafka Service Integrator (connection test)...")
-            self.kafka_manager = await get_kafka_manager()
-            _KAFKA_ENABLED = True
-            self.logger.info("✅ Kafka connection successful")
-        except Exception as e:
-            _KAFKA_ENABLED = False
-            self.logger.warning(f"⚠️ Kafka initialization failed (continuing without Kafka): {e}")
-            return  # Skip further setup
+        """Initialize the service integrator - Kafka is mandatory for production."""
+        global _KAFKA_ENABLED
+        
+        # Kafka connection is mandatory - no graceful fallback
+        self.logger.info("🚀 Initializing Kafka Service Integrator...")
+        self.kafka_manager = await get_kafka_manager()
+        _KAFKA_ENABLED = True
+        self.logger.info("✅ Kafka connection successful")
 
-        # If already initialized, nothing to do
-        if self._initialized:
-            return
-
-        try:
-            self.logger.info("🚀 Initializing Kafka Service Integrator (full setup)...")
-            # Initialize integrations
-            self.integrations['conversation'] = ConversationEventIntegration(
-                redis_manager=redis_manager,
-                supabase_client=supabase_client
-            )
-            self.integrations['ai_response'] = AIResponseEventIntegration(
-                analytics_service=analytics_service,
-                cost_tracker=cost_tracker
-            )
-            self.integrations['business_analytics'] = BusinessAnalyticsEventIntegration(
-                analytics_db=analytics_service,
-                dashboard_service=dashboard_service
-            )
-            # Register event handlers with event bus
-            if self.kafka_manager.event_bus:
-                for event_type in EventType:
-                    for integration in self.integrations.values():
-                        if integration.can_handle(Event(type=event_type, source="test")):
-                            self.kafka_manager.event_bus.subscribe(event_type, integration)
-            # Setup event publishers
-            self._setup_event_publishers()
-            self._initialized = True
-            self.logger.info("✅ Kafka Service Integrator fully initialized")
-        except Exception as e:
-            self.logger.error(f"❌ Failed to initialize Kafka Service Integrator: {e}")
-            raise
+        # Initialize integrations - this is now the main initialization
+        self.integrations['conversation'] = ConversationEventIntegration(
+            redis_manager=redis_manager,
+            supabase_client=supabase_client
+        )
+        self.integrations['ai_response'] = AIResponseEventIntegration(
+            analytics_service=analytics_service,
+            cost_tracker=cost_tracker
+        )
+        self.integrations['business_analytics'] = BusinessAnalyticsEventIntegration(
+            analytics_db=analytics_service,
+            dashboard_service=dashboard_service
+        )
+        
+        # Register event handlers with event bus
+        if self.kafka_manager.event_bus:
+            for event_type in EventType:
+                for integration in self.integrations.values():
+                    if integration.can_handle(Event(type=event_type, source="test")):
+                        self.kafka_manager.event_bus.subscribe(event_type, integration)
+        
+        # Setup event publishers
+        self._setup_event_publishers()
+        self._initialized = True
+        self.logger.info("✅ Kafka Service Integrator initialized")
     
     async def start_health_monitoring(self) -> None:
         """Start background health monitoring for Kafka"""
@@ -531,8 +517,7 @@ async def initialize_kafka_integration(
 async def publish_conversation_started(conversation_id: str, user_id: str, **kwargs) -> None:
     """Publish conversation started event"""
     if not _KAFKA_ENABLED:
-        logger.debug("Kafka disabled – skipping publish_conversation_started")
-        return
+        raise RuntimeError("Kafka is not initialized - required for production")
     integrator = await get_kafka_service_integrator()
     await integrator.publish_event('conversation_started', 
                                  conversation_id=conversation_id, 
@@ -543,8 +528,7 @@ async def publish_conversation_started(conversation_id: str, user_id: str, **kwa
 async def publish_conversation_message(conversation_id: str, user_id: str, message_content: str, **kwargs) -> None:
     """Publish conversation message event"""
     if not _KAFKA_ENABLED:
-        logger.debug("Kafka disabled – skipping publish_conversation_message")
-        return
+        raise RuntimeError("Kafka is not initialized - required for production")
     integrator = await get_kafka_service_integrator()
     await integrator.publish_event('conversation_message',
                                  conversation_id=conversation_id,
@@ -556,8 +540,7 @@ async def publish_conversation_message(conversation_id: str, user_id: str, messa
 async def publish_ai_response_generated(model_name: str, response_data: Dict[str, Any], user_id: str, **kwargs) -> None:
     """Publish AI response generated event"""
     if not _KAFKA_ENABLED:
-        logger.debug("Kafka disabled – skipping publish_ai_response_generated")
-        return
+        raise RuntimeError("Kafka is not initialized - required for production")
     integrator = await get_kafka_service_integrator()
     await integrator.publish_event('ai_response_generated',
                                  model_name=model_name,
@@ -568,8 +551,7 @@ async def publish_ai_response_generated(model_name: str, response_data: Dict[str
 
 async def publish_business_analytics_update(metric_name: str, metric_value: Any, business_id: str, **kwargs) -> None:
         if not _KAFKA_ENABLED:
-            logger.debug("Kafka disabled – skipping publish_business_analytics_update")
-            return
+            raise RuntimeError("Kafka is not initialized - required for production")
         integrator = await get_kafka_service_integrator()
         await integrator.publish_event('business_analytics_update',
                                  metric_name=metric_name,

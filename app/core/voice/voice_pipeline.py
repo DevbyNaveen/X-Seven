@@ -1,24 +1,16 @@
-"""
-PipeCat Voice Pipeline Implementation
-
-This module implements the core voice pipeline using PipeCat AI framework
-with integration to X-Seven's existing services.
-"""
-
-import asyncio
 import logging
-from typing import Dict, Any, Optional, Callable, List
 from datetime import datetime
-import json
+from typing import Dict, Any, Optional, Callable, List
 
 try:
     from pipecat.pipeline.pipeline import Pipeline
     from pipecat.pipeline.runner import PipelineRunner
     from pipecat.pipeline.task import PipelineTask
-    from pipecat.services.elevenlabs import ElevenLabsTTSService
-    from pipecat.services.openai import OpenAILLMService, OpenAISTTService
-    from pipecat.transports.services.twilio import TwilioTransport
-    from pipecat.transports.services.websocket import WebsocketTransport
+    from pipecat.services.elevenlabs.tts import ElevenLabsTTSService
+    from pipecat.services.openai.llm import OpenAILLMService
+    from pipecat.services.openai.stt import OpenAISTTService
+    from pipecat.transports.twilio import TwilioTransport
+    from pipecat.transports.websocket import WebsocketTransport
     from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext
     from pipecat.frames.frames import (
         Frame, AudioRawFrame, TextFrame, TranscriptionFrame,
@@ -29,6 +21,7 @@ try:
 except ImportError:
     PIPECAT_AVAILABLE = False
     # Create mock classes for development
+    
     class Pipeline:
         def __init__(self, *args, **kwargs):
             self.services = args

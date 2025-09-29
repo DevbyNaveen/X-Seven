@@ -276,7 +276,7 @@ class KafkaMonitor:
             try:
                 await self._collect_metrics()
                 await self._check_thresholds()
-                await self._update_health_score()
+                # Health score is already updated in _update_system_metrics()
                 
                 await asyncio.sleep(self.collection_interval)
                 
@@ -307,12 +307,19 @@ class KafkaMonitor:
     async def _collect_topic_metrics(self) -> None:
         """Collect topic-level metrics"""
         try:
-            # Get topic metadata
-            metadata = await self.admin_client.describe_topics()
+            # Get all topic names first
+            topics = await self.admin_client.list_topics()
             
-            for topic_name, topic_metadata in metadata.items():
-                partition_count = len(topic_metadata.partitions)
-                self.topic_partition_count.labels(topic=topic_name).set(partition_count)
+            if topics:
+                # Get metadata for all topics at once
+                metadata = await self.admin_client.describe_topics(topics)
+                
+                for topic_name in topics:
+                    if topic_name in metadata:
+                        topic_info = metadata[topic_name]
+                        # topic_info.partitions is a list of partition info
+                        partition_count = len(topic_info.partitions) if hasattr(topic_info, 'partitions') else 0
+                        self.topic_partition_count.labels(topic=topic_name).set(partition_count)
                 
         except Exception as e:
             self.logger.error(f"❌ Error collecting topic metrics: {e}")
@@ -559,6 +566,20 @@ class KafkaMonitor:
             return json.dumps(self.get_metrics(), indent=2)
         else:
             raise ValueError(f"Unsupported export format: {format}")
+    
+    async def perform_check(self) -> bool:
+        """Perform health check for Kafka monitoring system"""
+        try:
+            if not self._monitoring or not self.admin_client:
+                return False
+            
+            # Simple check - verify we can list topics
+            topics = await self.admin_client.list_topics()
+            return len(topics) >= 0  # Just check if we can connect and get a response
+            
+        except Exception as e:
+            self.logger.error(f"❌ Health check failed: {e}")
+            return False
 
 
 # Alert handler implementations

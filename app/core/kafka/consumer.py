@@ -8,6 +8,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import random
 import time
 from typing import Dict, Any, Optional, List, Callable, Awaitable, Set
 from datetime import datetime
@@ -177,21 +178,37 @@ class KafkaConsumer:
         return self._running and self.consumer is not None
     
     async def consume(self) -> None:
-        """Main consumption loop"""
+        """Main consumption loop with robust retry mechanism"""
         if not self.is_running():
             raise RuntimeError("Consumer not running")
         
         self._consuming = True
         self.logger.info(f"🔄 Starting consumption loop for topic: {self.topic}")
         
+        # Retry configuration with exponential backoff
+        max_retries = 5
+        base_retry_delay = 1.0
+        max_retry_delay = 30.0
+        consecutive_failures = 0
+        last_successful_poll = time.time()
+        
         try:
             while self._running and not self._shutdown_event.is_set():
                 try:
+                    # Check if we need to reconnect due to extended outage
+                    if time.time() - last_successful_poll > 60.0 and consecutive_failures >= 3:
+                        self.logger.warning(f"Connection issues detected for {self.topic}, attempting reconnection")
+                        await self._reconnect()
+                    
                     # Poll for messages with timeout
                     msg_pack = await asyncio.wait_for(
                         self.consumer.getmany(timeout_ms=1000),
                         timeout=2.0
                     )
+                    
+                    # Reset failure counter on successful poll
+                    consecutive_failures = 0
+                    last_successful_poll = time.time()
                     
                     if not msg_pack:
                         continue
@@ -209,12 +226,59 @@ class KafkaConsumer:
                     break
                     
                 except Exception as e:
-                    self.logger.error(f"❌ Error in consumption loop: {e}")
-                    await asyncio.sleep(1.0)  # Brief pause before retrying
+                    consecutive_failures += 1
+                    
+                    # Calculate retry delay with exponential backoff and jitter
+                    retry_attempt = min(consecutive_failures, max_retries)
+                    delay = min(base_retry_delay * (2 ** (retry_attempt - 1)), max_retry_delay)
+                    jitter = delay * 0.2 * (random.random() * 2 - 1)  # +/- 20% jitter
+                    actual_delay = max(0.1, delay + jitter)
+                    
+                    self.logger.error(
+                        f"❌ Error in consumption loop (attempt {consecutive_failures}): {e}. "
+                        f"Retrying in {actual_delay:.2f}s"
+                    )
+                    
+                    # If we've had too many consecutive failures, try to reconnect
+                    if consecutive_failures >= max_retries:
+                        self.logger.warning(
+                            f"Too many consecutive failures ({consecutive_failures}) for {self.topic}, "
+                            f"attempting to reconnect"
+                        )
+                        try:
+                            await self._reconnect()
+                            consecutive_failures = 0  # Reset counter on successful reconnect
+                        except Exception as reconnect_error:
+                            self.logger.error(f"Reconnection failed: {reconnect_error}")
+                    
+                    await asyncio.sleep(actual_delay)  # Backoff before retrying
         
         finally:
             self._consuming = False
             self.logger.info(f"✅ Consumption loop ended for topic: {self.topic}")
+    
+    async def _reconnect(self) -> None:
+        """Attempt to reconnect the consumer"""
+        self.logger.info(f"🔄 Attempting to reconnect consumer for topic: {self.topic}")
+        
+        try:
+            # Stop current consumer
+            if self.consumer:
+                await self.consumer.stop()
+                self.consumer = None
+            
+            # Create and start a new consumer
+            self.consumer = AIOKafkaConsumer(
+                self.topic,
+                **self.config
+            )
+            
+            await self.consumer.start()
+            self.logger.info(f"✅ Successfully reconnected consumer for topic: {self.topic}")
+            
+        except Exception as e:
+            self.logger.error(f"❌ Failed to reconnect consumer for {self.topic}: {e}")
+            raise
     
     async def _process_partition_messages(
         self,

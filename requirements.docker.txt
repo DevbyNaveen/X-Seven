@@ -10,6 +10,8 @@ supabase==2.3.1
 
 # Authentication & Security
 python-jose[cryptography]
+passlib==1.7.4
+bcrypt==3.2.0
 python-dotenv
 PyJWT==2.8.0
 
@@ -18,25 +20,21 @@ celery
 redis
 
 # HTTP Client
-httpx>=0.25,<1.0
+httpx==0.25.0
 
 # AI & LLM
 openai==1.12.0
 anthropic==0.18.1
 groq==0.4.2
-langchain>=0.2.0
-langchain-openai>=0.1.0
-langchain-anthropic>=0.1.0
-langgraph>=0.1.0
-langgraph-prebuilt>=0.1.0
+langchain==0.1.9
+langchain-openai==0.0.5
+langchain-anthropic==0.1.1
 
 # Vector Database
 qdrant-client==1.7.3
 sentence-transformers==2.3.1
-scikit-learn>=1.3.0
-numpy>=1.24.0
 
-# Voice Processing (Basic)
+# Voice Processing
 elevenlabs==0.2.27
 pydub==0.25.1
 
@@ -78,16 +76,17 @@ diskcache==5.6.3
 # Additional phone providers
 vonage==3.5.0
 nexmo
+messagebird==2.1.0
 
 # Production Server
 gunicorn==21.2.0
 uvicorn[standard]==0.24.0
-temporalio
 
 # Monitoring & Logging
 sentry-sdk==1.38.0
 prometheus-client==0.19.0
 python-json-logger==2.0.7
+structlog==23.2.0
 
 # Performance
 aiocache==0.12.2
@@ -103,49 +102,9 @@ slowapi==0.1.9
 # Health Checks
 py-healthcheck==1.10.1
 
-# Cloud Storage
+# Cloud Storage (if needed)
 boto3==1.29.7
 google-cloud-storage==2.10.0
 
-# APM
-ddtrace
-
-# CrewAI
-crewai>=0.1.0
-
-# LangGraph Enhanced
-langgraph-checkpoint>=0.1.0
-langgraph-sdk>=0.1.0
-
-# Redis Enhanced
-redis[hiredis]>=4.5.0
-aioredis>=2.0.0
-
-# Temporal Enhanced
-temporalio>=1.0.0
-
-# Additional Utilities
-dataclasses-json>=0.6.0
-pydantic[email]>=2.0.0
-fastapi-limiter>=0.1.5
-
-# Kafka Integration
-aiokafka>=0.10.0
-kafka-python>=2.0.2
-confluent-kafka>=2.3.0
-avro-python3>=1.10.0
-fastavro>=1.9.0
-
-# Event Sourcing
-pydantic-avro>=0.4.0
-
-# DSPy Framework
-dspy-ai>=2.4.0
-datasets>=2.14.0
-evaluate>=0.4.0
-
-# Evolution API Integration
-aiohttp>=3.9.1
-requests>=2.28.0
-websocket-client>=1.6.0
-python-magic>=0.4.27
+# APM (Application Performance Monitoring)
+ddtrace==2.3.0

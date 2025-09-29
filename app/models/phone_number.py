@@ -28,5 +28,10 @@ class PhoneNumber(SupabaseModel):
         self.is_primary = kwargs.get('is_primary', False)
         self.type = kwargs.get('type')
         self.webhook_url = kwargs.get('webhook_url')
+        # Hybrid routing additions
+        self.forwarding_number = kwargs.get('forwarding_number')  # e.g., Twilio target for a custom number
+        self.is_forwarding_target = kwargs.get('is_forwarding_target', False)  # True for provider numbers that receive forwarded traffic
+        # Channel capabilities (voice, sms, whatsapp)
+        self.capabilities = kwargs.get('capabilities')  # Optional[List[str]] stored as JSON in DB
         self.created_at = kwargs.get('created_at')
         self.updated_at = kwargs.get('updated_at')

@@ -1,0 +1,115 @@
+# Service Mesh Configuration for X-Seven AI Framework
+# Modern dependency management with circuit breakers and health monitoring
+
+# Database Configuration
+database:
+  enabled: true
+  host: ${DATABASE_HOST:localhost}
+  port: ${DATABASE_PORT:5432}
+  database: ${DATABASE_NAME:xseven}
+  username: ${DATABASE_USERNAME:postgres}
+  password: ${DATABASE_PASSWORD:}
+  ssl_mode: ${DATABASE_SSL_MODE:prefer}
+  pool_size: ${DATABASE_POOL_SIZE:20}
+  max_overflow: ${DATABASE_MAX_OVERFLOW:30}
+  timeout: 30
+  retry_count: 3
+  retry_delay: 1.0
+  health_check_interval: 30
+
+# Redis Configuration
+redis:
+  enabled: true
+  host: ${REDIS_HOST:localhost}
+  port: ${REDIS_PORT:6379}
+  database: ${REDIS_DATABASE:0}
+  password: ${REDIS_PASSWORD:}
+  ssl: ${REDIS_SSL:false}
+  socket_timeout: 30
+  socket_connect_timeout: 30
+  timeout: 30
+  retry_count: 3
+  retry_delay: 1.0
+  health_check_interval: 30
+
+# Kafka Configuration
+kafka:
+  enabled: true
+  bootstrap_servers: ${KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
+  security_protocol: ${KAFKA_SECURITY_PROTOCOL:PLAINTEXT}
+  consumer_group_id: ${KAFKA_CONSUMER_GROUP_ID:xseven-consumer}
+  topics:
+    user-events:
+      partitions: 3
+      replication_factor: 1
+    business-events:
+      partitions: 3
+      replication_factor: 1
+    analytics-events:
+      partitions: 3
+      replication_factor: 1
+    voice-events:
+      partitions: 3
+      replication_factor: 1
+  timeout: 30
+  retry_count: 3
+  retry_delay: 2.0
+  health_check_interval: 30
+
+# Temporal Configuration
+temporal:
+  enabled: true
+  host: ${TEMPORAL_HOST:localhost}
+  port: ${TEMPORAL_PORT:7233}
+  namespace: ${TEMPORAL_NAMESPACE:default}
+  task_queue: ${TEMPORAL_TASK_QUEUE:xseven-tasks}
+  timeout: 30
+  retry_count: 3
+  retry_delay: 2.0
+  health_check_interval: 30
+
+# CrewAI Configuration
+crewai:
+  enabled: true
+  max_agents: 10
+  timeout: 300
+  verbose: false
+  memory: true
+  retry_count: 3
+  retry_delay: 1.0
+  health_check_interval: 30
+
+# DSPy Configuration
+dspy:
+  enabled: true
+  model: ${DSPY_MODEL:gpt-4o-mini}
+  temperature: 0.7
+  max_tokens: 1000
+  optimization_enabled: true
+  training_data_path: ${DSPY_TRAINING_DATA_PATH:}
+  timeout: 30
+  retry_count: 3
+  retry_delay: 1.0
+  health_check_interval: 30
+
+# Voice Service Configuration
+voice:
+  enabled: true
+  provider: ${VOICE_PROVIDER:openai}
+  model: ${VOICE_MODEL:gpt-4o-mini}
+  stt_provider: ${VOICE_STT_PROVIDER:openai}
+  tts_provider: ${VOICE_TTS_PROVIDER:elevenlabs}
+  voice_id: ${VOICE_VOICE_ID:pNInz6obpgDQGcFmaJgB}
+  max_concurrent_calls: 10
+  timeout: 60
+  retry_count: 3
+  retry_delay: 2.0
+  health_check_interval: 30
+
+# Service Mesh Settings
+health_check_interval: 30
+circuit_breaker_threshold: 5
+circuit_breaker_timeout: 60
+max_concurrent_starts: 3
+startup_timeout: 300
+graceful_shutdown_timeout: 30

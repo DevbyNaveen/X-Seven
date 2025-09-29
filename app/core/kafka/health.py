@@ -191,7 +191,7 @@ class KafkaHealthCheck:
             
             # Try to get cluster metadata
             metadata = await admin_client.describe_cluster()
-            broker_count = len(metadata.brokers) if hasattr(metadata, 'brokers') else 0
+            broker_count = len(metadata.get('brokers', []))
             
             await admin_client.close()
             

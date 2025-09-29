@@ -1,16 +1,112 @@
-"""
-Context builders for different chat contexts
-"""
+"""Context builders for different chat contexts"""
 from __future__ import annotations
 
 import logging
 from typing import Dict, Any, List, Optional
+from datetime import datetime
 
 from app.config.settings import settings
+from app.config.database import get_supabase_client
 from app.core.ai.types import RichContext, ChatContext
 from app.core.ai.role_mapper import RoleMapper
 
 logger = logging.getLogger(__name__)
+
+
+class BusinessContextBuilder:
+    """Builder for retrieving and formatting business context"""
+    
+    def __init__(self):
+        """Initialize the business context builder"""
+        self.supabase = get_supabase_client()
+    
+    async def build_business_context(self, business_id: str, include_menu: bool = True) -> Dict[str, Any]:
+        """Build context for a specific business"""
+        try:
+            # Validate business ID format (should be a UUID)
+            if not isinstance(business_id, str) or len(business_id) < 10:
+                logger.error(f"Invalid business ID format: {business_id}")
+                return {"error": "Invalid business ID format"}
+            
+            # Load business information
+            business_response = self.supabase.table('businesses').select('*').eq('id', business_id).execute()
+            
+            if not hasattr(business_response, 'data') or not business_response.data:
+                logger.error(f"Business not found: {business_id}")
+                return {"error": "Business not found"}
+                
+            business = business_response.data[0]
+            
+            # Build basic business context
+            context = {
+                "business_id": business_id,
+                "business_name": business.get('name', 'Unknown Business'),
+                "business_category": business.get('business_category', 'general'),
+                "business_description": business.get('description', ''),
+                "is_active": business.get('is_active', True),
+                "timestamp": datetime.now().isoformat()
+            }
+            
+            # Add email and phone if available
+            if 'email' in business:
+                context['business_email'] = business['email']
+            if 'phone' in business:
+                context['business_phone'] = business['phone']
+            
+            # Add business hours if available
+            try:
+                hours_response = self.supabase.table('business_hours').select('*').eq('business_id', business_id).execute()
+                if hasattr(hours_response, 'data') and hours_response.data:
+                    context['business_hours'] = hours_response.data
+            except Exception as e:
+                logger.warning(f"Failed to load business hours: {e}")
+            
+            # Add menu items if requested
+            if include_menu:
+                try:
+                    menu_response = self.supabase.table('menu_items').select('*').eq('business_id', business_id).eq('is_available', True).limit(10).execute()
+                    
+                    if hasattr(menu_response, 'data') and menu_response.data:
+                        menu_items = [
+                            {
+                                "name": item.get('name', ''),
+                                "description": item.get('description', ''),
+                                "price": float(item.get('price', 0)),
+                                "category": item.get('category', '')
+                            }
+                            for item in menu_response.data
+                        ]
+                        context['menu_items'] = menu_items
+                        context['menu_count'] = len(menu_items)
+                except Exception as e:
+                    logger.warning(f"Failed to load menu items: {e}")
+            
+            return context
+            
+        except Exception as e:
+            logger.error(f"Failed to build business context: {e}")
+            return {"error": str(e)}
+    
+    async def build_voice_business_context(self, business_id: str) -> Dict[str, Any]:
+        """Build voice-optimized context for a specific business"""
+        try:
+            # Get base business context
+            context = await self.build_business_context(business_id)
+            
+            # Add voice-specific fields
+            context['channel'] = 'voice'
+            context['requires_voice_optimization'] = True
+            context['speech_optimized'] = True
+            
+            # Add standard greeting
+            business_name = context.get('business_name', 'our business')
+            context['greeting'] = f"Thank you for calling {business_name}. How may I assist you today?"
+            
+            return context
+            
+        except Exception as e:
+            logger.error(f"Failed to build voice business context: {e}")
+            return {"error": str(e), "channel": "voice"}
 
 
 async def build_global_context(context: RichContext) -> RichContext:

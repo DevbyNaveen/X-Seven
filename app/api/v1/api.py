@@ -15,6 +15,7 @@ from app.api.v1.endpoints.food import menu as food_menu, order as food_order, ta
 from app.api.v1.endpoints.food.websocket.dashboard_websocket import router as dashboard_ws_router
 from app.api.v1.endpoints.food.websocket.kitchen_websocket import router as kitchen_ws_router
 from app.api.v1.evolution_api import router as evolution_router
+from app.api.v1.endpoints.communications import webhooks as communications_webhooks
 # from app.api.v1.endpoints.AREndpoints.analytics import router as analytics_router
 # from app.api.v1.endpoints.AREndpoints.reports import router as reports_router
 # from app.api.v1.endpoints.AREndpoints.business_intelligence import router as business_intelligence_router
@@ -117,6 +118,12 @@ api_router.include_router(
     kitchen_ws_router,
     prefix="/food/kitchen/ws",
     tags=["Food Service - Kitchen WebSocket"]
+)
+
+# Communications webhooks (voice, SMS, WhatsApp)
+api_router.include_router(
+    communications_webhooks.router,
+    tags=["Communications"]
 )
 
 # # Include Analytics and Reporting endpoints
