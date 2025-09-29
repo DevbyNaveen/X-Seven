@@ -20,7 +20,7 @@ redis==5.0.1
 # HTTP Client - Fixed for supabase compatibility
 httpx==0.24.1
 
-# AI & LLM
+# AI & LLM (without heavy ML dependencies)
 openai==1.12.0
 anthropic==0.18.1
 groq==0.4.2
@@ -28,13 +28,8 @@ langchain==0.1.9
 langchain-openai==0.0.5
 langchain-anthropic==0.1.1
 
-# Vector Database - Use pre-compiled versions
+# Vector Database (without ML models)
 qdrant-client==1.7.3
-# Replace sentence-transformers with lighter alternative initially
-# sentence-transformers==2.3.1
-transformers==4.35.0
-torch==2.1.0 --index-url https://download.pytorch.org/whl/cpu
-scikit-learn==1.3.0
 numpy==1.24.3
 
 # Voice Processing
@@ -63,9 +58,6 @@ pillow==10.1.0
 aioredis==2.0.1
 asyncio-mqtt==0.13.0
 
-# Chat & Messaging - uuid is built-in, remove this line
-# uuid
-
 # WhatsApp
 heyoo==0.0.8
 
@@ -78,7 +70,6 @@ diskcache==5.6.3
 
 # Additional phone providers
 vonage==3.5.0
-# Remove nexmo (deprecated, use vonage instead)
 messagebird==2.1.0
 
 # --- Production & Performance Tools ---
@@ -107,9 +98,9 @@ slowapi==0.1.9
 # Health Checks
 py-healthcheck==1.10.1
 
-# Cloud Storage (if needed)
+# Cloud Storage
 boto3==1.29.7
 google-cloud-storage==2.10.0
 
-# APM (Application Performance Monitoring)
+# APM
 ddtrace==2.3.0
