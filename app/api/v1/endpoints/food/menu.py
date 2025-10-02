@@ -1,13 +1,15 @@
-"""Menu management endpoints for food businesses."""
+"""Menu management endpoints compatible with User object from dependencies."""
 from typing import List, Optional, Dict, Any, Union, Tuple
 from fastapi import APIRouter, Depends, HTTPException, status, Query
 from pydantic import BaseModel
-from sqlalchemy import func
 from app.config.database import get_supabase_client
-from app.core.dependencies import get_current_business, get_current_user
-from app.models import Business, User, MenuItem, MenuCategory
+from app.core.dependencies import get_current_user, get_current_business
+from app.models.user import User
+from app.models.business import Business
+import logging
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
 
 class MenuItemCreate(BaseModel):
     name: str
@@ -69,11 +71,16 @@ async def get_menu_items(
         response = query.order("created_at", desc=True).execute()
 
         if response.data:
+            logger.info(f"Found {len(response.data)} menu items for business {current_business.id}")
             return response.data
         else:
+            logger.info(f"No menu items found for business {current_business.id}")
             return []
 
+    except HTTPException:
+        raise
     except Exception as e:
+        logger.error(f"Error fetching menu items: {str(e)}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to fetch menu items: {str(e)}"
@@ -89,7 +96,9 @@ async def create_menu_item(
     """Create a new menu item."""
     try:
         # Verify category exists for this business
-        category_response = supabase.table("menu_categories").select("id").eq("id", item_data.category_id).eq("business_id", str(current_business.id)).execute()
+        category_response = supabase.table("menu_categories").select("id").eq(
+            "id", item_data.category_id
+        ).eq("business_id", str(current_business.id)).execute()
 
         if not category_response.data:
             raise HTTPException(
@@ -106,7 +115,7 @@ async def create_menu_item(
             "category_id": item_data.category_id,
             "image_url": item_data.image_url,
             "is_available": item_data.is_available,
-           
+            "preparation_time": item_data.preparation_time,
             "sort_order": item_data.sort_order
         }
 
@@ -114,6 +123,7 @@ async def create_menu_item(
         response = supabase.table("menu_items").insert(menu_item_data).execute()
 
         if response.data:
+            logger.info(f"Created menu item: {item_data.name} for business {current_business.id}")
             return response.data[0]
         else:
             raise HTTPException(
@@ -124,6 +134,7 @@ async def create_menu_item(
     except HTTPException:
         raise
     except Exception as e:
+        logger.error(f"Error creating menu item: {str(e)}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to create menu item: {str(e)}"
@@ -140,7 +151,9 @@ async def update_menu_item(
     """Update a menu item (price, availability, etc.)."""
     try:
         # Verify menu item exists and belongs to this business
-        existing_item = supabase.table("menu_items").select("*").eq("id", item_id).eq("business_id", str(current_business.id)).execute()
+        existing_item = supabase.table("menu_items").select("*").eq(
+            "id", item_id
+        ).eq("business_id", str(current_business.id)).execute()
 
         if not existing_item.data:
             raise HTTPException(
@@ -160,9 +173,12 @@ async def update_menu_item(
             return existing_item.data[0]
 
         # Update the menu item
-        response = supabase.table("menu_items").update(update_data).eq("id", item_id).eq("business_id", str(current_business.id)).execute()
+        response = supabase.table("menu_items").update(update_data).eq(
+            "id", item_id
+        ).eq("business_id", str(current_business.id)).execute()
 
         if response.data:
+            logger.info(f"Updated menu item {item_id} for business {current_business.id}")
             return response.data[0]
         else:
             raise HTTPException(
@@ -173,6 +189,7 @@ async def update_menu_item(
     except HTTPException:
         raise
     except Exception as e:
+        logger.error(f"Error updating menu item: {str(e)}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to update menu item: {str(e)}"
@@ -188,7 +205,9 @@ async def delete_menu_item(
     """Remove a menu item."""
     try:
         # Verify menu item exists and belongs to this business
-        existing_item = supabase.table("menu_items").select("id").eq("id", item_id).eq("business_id", str(current_business.id)).execute()
+        existing_item = supabase.table("menu_items").select("id").eq(
+            "id", item_id
+        ).eq("business_id", str(current_business.id)).execute()
 
         if not existing_item.data:
             raise HTTPException(
@@ -197,8 +216,11 @@ async def delete_menu_item(
             )
 
         # Delete the menu item
-        response = supabase.table("menu_items").delete().eq("id", item_id).eq("business_id", str(current_business.id)).execute()
+        response = supabase.table("menu_items").delete().eq(
+            "id", item_id
+        ).eq("business_id", str(current_business.id)).execute()
 
+        logger.info(f"Deleted menu item {item_id} for business {current_business.id}")
         return {
             "status": "success",
             "message": "Menu item deleted successfully"
@@ -207,6 +229,7 @@ async def delete_menu_item(
     except HTTPException:
         raise
     except Exception as e:
+        logger.error(f"Error deleting menu item: {str(e)}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to delete menu item: {str(e)}"
@@ -220,14 +243,21 @@ async def get_menu_categories(
 ) -> List[dict]:
     """Get all menu categories for the business."""
     try:
-        response = supabase.table("menu_categories").select("*").eq("business_id", str(current_business.id)).order("created_at", desc=True).execute()
+        response = supabase.table("menu_categories").select("*").eq(
+            "business_id", str(current_business.id)
+        ).order("created_at", desc=True).execute()
 
         if response.data:
+            logger.info(f"Found {len(response.data)} categories for business {current_business.id}")
             return response.data
         else:
+            logger.info(f"No categories found for business {current_business.id}")
             return []
 
+    except HTTPException:
+        raise
     except Exception as e:
+        logger.error(f"Error fetching categories: {str(e)}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to fetch menu categories: {str(e)}"
@@ -243,7 +273,9 @@ async def create_menu_category(
     """Create a new menu category."""
     try:
         # Check if category with same name already exists for this business
-        existing_response = supabase.table("menu_categories").select("id").eq("name", category_data.name).eq("business_id", str(current_business.id)).execute()
+        existing_response = supabase.table("menu_categories").select("id").eq(
+            "name", category_data.name
+        ).eq("business_id", str(current_business.id)).execute()
 
         if existing_response.data:
             raise HTTPException(
@@ -264,6 +296,7 @@ async def create_menu_category(
         response = supabase.table("menu_categories").insert(category_data_dict).execute()
 
         if response.data:
+            logger.info(f"Created category: {category_data.name} for business {current_business.id}")
             return response.data[0]
         else:
             raise HTTPException(
@@ -274,6 +307,7 @@ async def create_menu_category(
     except HTTPException:
         raise
     except Exception as e:
+        logger.error(f"Error creating category: {str(e)}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to create menu category: {str(e)}"
@@ -290,7 +324,9 @@ async def update_menu_category(
     """Update a menu category."""
     try:
         # Verify category exists and belongs to this business
-        existing_category = supabase.table("menu_categories").select("*").eq("id", category_id).eq("business_id", str(current_business.id)).execute()
+        existing_category = supabase.table("menu_categories").select("*").eq(
+            "id", category_id
+        ).eq("business_id", str(current_business.id)).execute()
 
         if not existing_category.data:
             raise HTTPException(
@@ -310,9 +346,12 @@ async def update_menu_category(
             return existing_category.data[0]
 
         # Update the category
-        response = supabase.table("menu_categories").update(update_data).eq("id", category_id).eq("business_id", str(current_business.id)).execute()
+        response = supabase.table("menu_categories").update(update_data).eq(
+            "id", category_id
+        ).eq("business_id", str(current_business.id)).execute()
 
         if response.data:
+            logger.info(f"Updated category {category_id} for business {current_business.id}")
             return response.data[0]
         else:
             raise HTTPException(
@@ -323,6 +362,7 @@ async def update_menu_category(
     except HTTPException:
         raise
     except Exception as e:
+        logger.error(f"Error updating category: {str(e)}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to update menu category: {str(e)}"
@@ -338,7 +378,9 @@ async def delete_menu_category(
     """Delete a menu category."""
     try:
         # Verify category exists and belongs to this business
-        existing_category = supabase.table("menu_categories").select("*").eq("id", category_id).eq("business_id", str(current_business.id)).execute()
+        existing_category = supabase.table("menu_categories").select("*").eq(
+            "id", category_id
+        ).eq("business_id", str(current_business.id)).execute()
 
         if not existing_category.data:
             raise HTTPException(
@@ -347,7 +389,9 @@ async def delete_menu_category(
             )
 
         # Check if there are menu items in this category
-        items_count_response = supabase.table("menu_items").select("id", count="exact").eq("category_id", category_id).execute()
+        items_count_response = supabase.table("menu_items").select("id", count="exact").eq(
+            "category_id", category_id
+        ).execute()
 
         if items_count_response.count and items_count_response.count > 0:
             raise HTTPException(
@@ -356,8 +400,11 @@ async def delete_menu_category(
             )
 
         # Delete the category
-        response = supabase.table("menu_categories").delete().eq("id", category_id).eq("business_id", str(current_business.id)).execute()
+        response = supabase.table("menu_categories").delete().eq(
+            "id", category_id
+        ).eq("business_id", str(current_business.id)).execute()
 
+        logger.info(f"Deleted category {category_id} for business {current_business.id}")
         return {
             "status": "success",
             "message": "Category deleted successfully"
@@ -366,6 +413,7 @@ async def delete_menu_category(
     except HTTPException:
         raise
     except Exception as e:
+        logger.error(f"Error deleting category: {str(e)}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to delete menu category: {str(e)}"
@@ -382,7 +430,9 @@ async def toggle_item_availability(
     """Toggle item availability."""
     try:
         # Verify menu item exists and belongs to this business
-        existing_item = supabase.table("menu_items").select("*").eq("id", item_id).eq("business_id", str(current_business.id)).execute()
+        existing_item = supabase.table("menu_items").select("*").eq(
+            "id", item_id
+        ).eq("business_id", str(current_business.id)).execute()
 
         if not existing_item.data:
             raise HTTPException(
@@ -392,9 +442,12 @@ async def toggle_item_availability(
 
         # Update availability
         update_data = {"is_available": availability_data.is_available}
-        response = supabase.table("menu_items").update(update_data).eq("id", item_id).eq("business_id", str(current_business.id)).execute()
+        response = supabase.table("menu_items").update(update_data).eq(
+            "id", item_id
+        ).eq("business_id", str(current_business.id)).execute()
 
         if response.data:
+            logger.info(f"Updated availability for item {item_id} to {availability_data.is_available}")
             return response.data[0]
         else:
             raise HTTPException(
@@ -405,6 +458,7 @@ async def toggle_item_availability(
     except HTTPException:
         raise
     except Exception as e:
+        logger.error(f"Error toggling availability: {str(e)}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to toggle item availability: {str(e)}"

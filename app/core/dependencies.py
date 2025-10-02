@@ -1,4 +1,4 @@
-"""Common dependencies for API endpoints."""
+"""Minimal changes to preserve original authentication while fixing session management."""
 from typing import Generator, Optional, Dict, Any
 from fastapi import Depends, HTTPException, status, Header
 from fastapi.security import OAuth2PasswordBearer
@@ -7,10 +7,9 @@ from app.config.database import get_supabase_client
 from app.core.supabase_auth import verify_supabase_token
 from app.models.user import User
 from app.models.business import Business
+import logging
 
-# OAuth2 schemes are no longer used since we're using Header-based authentication
-# that supports both custom JWT and Supabase tokens
-
+logger = logging.getLogger(__name__)
 
 async def get_current_user(
     authorization: Optional[str] = Header(None),
@@ -18,8 +17,6 @@ async def get_current_user(
 ) -> User:
     """
     Get current authenticated user from Supabase token only.
-    This is a strict dependency and will raise an error if the user is not found 
-    or the token is invalid.
     """
     if not authorization:
         raise HTTPException(
@@ -28,7 +25,6 @@ async def get_current_user(
             headers={"WWW-Authenticate": "Bearer"},
         )
     
-    # Check if it's a Bearer token
     if not authorization.startswith("Bearer "):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -38,60 +34,48 @@ async def get_current_user(
     
     token = authorization.split("Bearer ")[1]
     
-    # Verify Supabase token only
+    # Use the auth helper that already handles Google tokens correctly
+    from app.core.supabase_auth import get_current_user_with_business
+    
     try:
-        supabase_payload = await verify_supabase_token(token)
+        user_data = await get_current_user_with_business(token)
         
-        if supabase_payload:
-            email: str = supabase_payload.get("email")
-            if not email:
-                raise HTTPException(
-                    status_code=status.HTTP_401_UNAUTHORIZED,
-                    detail="Invalid Supabase token payload",
-                )
-            
-            # Find business by owner email using Supabase
-            business_response = supabase.table("businesses").select("*").eq("email", email).execute()
-            if not business_response.data:
-                raise HTTPException(
-                    status_code=status.HTTP_404_NOT_FOUND,
-                    detail="Business not found for this email. Please register first.",
-                )
-            
-            business_data = business_response.data[0]
-            if not business_data.get("is_active", True):
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail="Business is inactive",
-                )
-            
-            # Create a User object from business data for backward compatibility
-            user_data = {
-                "id": business_data.get("owner_id"),
-                "email": email,
-                "business_id": business_data.get("id"),
-                "is_active": business_data.get("is_active", True),
-                "created_at": business_data.get("created_at"),
-                "updated_at": business_data.get("updated_at")
-            }
-            return User.from_dict(user_data)
+        # Extract business data if present
+        business_data = user_data.get("business")
+        if not business_data:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Business not found for this user.",
+            )
+        
+        if not business_data.get("is_active", True):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Business is inactive",
+            )
+        
+        # Create User object
+        user_obj_data = {
+            "id": user_data.get("sub"),
+            "email": user_data.get("email"),
+            "business_id": business_data.get("id"),
+            "is_active": business_data.get("is_active", True),
+            "created_at": business_data.get("created_at"),
+            "updated_at": business_data.get("updated_at")
+        }
+        
+        logger.info(f"Authenticated user {user_data.get('email')} with business {business_data.get('id')}")
+        return User.from_dict(user_obj_data)
+        
     except HTTPException:
-        # Re-raise HTTP exceptions from verify_supabase_token
         raise
     except Exception as e:
-        # Any other error during token processing
+        logger.error(f"Authentication error: {str(e)}")
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Could not validate Supabase token",
+            detail="Could not validate token",
             headers={"WWW-Authenticate": "Bearer"},
         )
-    
-    raise HTTPException(
-        status_code=status.HTTP_401_UNAUTHORIZED,
-        detail="Invalid Supabase token",
-        headers={"WWW-Authenticate": "Bearer"},
-    )
-
 
 async def get_current_user_optional(
     authorization: Optional[str] = Header(None),
@@ -105,6 +89,12 @@ async def get_current_user_optional(
         return None
     
     token = authorization.split("Bearer ")[1]
+    
+    # Set session for optional auth too
+    try:
+        supabase.auth.set_session(token, None)
+    except Exception:
+        pass  # Ignore session errors for optional auth
     
     try:
         # Verify Supabase token only
@@ -150,18 +140,21 @@ async def get_current_business(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="User is not associated with any business"
         )
+    
     business_response = supabase.table("businesses").select("*").eq("id", current_user.business_id).execute()
     if not business_response.data:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Business not found"
         )
+    
     business_data = business_response.data[0]
     if not business_data.get("is_active", True):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Business is inactive"
         )
+    
     return Business.from_dict(business_data)
 
 # New dependency: get_current_business_from_token
@@ -179,6 +172,13 @@ async def get_current_business_from_token(
             headers={"WWW-Authenticate": "Bearer"},
         )
     token = authorization.split("Bearer ")[1]
+    
+    # Set session for this request
+    try:
+        supabase.auth.set_session(token, None)
+    except Exception as e:
+        logger.error(f"Failed to set session: {e}")
+    
     payload = await verify_supabase_token(token)
     if not payload:
         raise HTTPException(
@@ -204,30 +204,6 @@ async def get_current_business_from_token(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Business is inactive"
         )
-    return Business.from_dict(business_data)
-    """
-    Get the business associated with current user.
-    """
-    if not current_user.business_id:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="User is not associated with any business"
-        )
-    
-    business_response = supabase.table("businesses").select("*").eq("id", current_user.business_id).execute()
-    if not business_response.data:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Business not found"
-        )
-    
-    business_data = business_response.data[0]
-    if not business_data.get("is_active", True):
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Business is inactive"
-        )
-    
     return Business.from_dict(business_data)
 
 

@@ -23,10 +23,15 @@ api_router = APIRouter()
 # Include only Supabase authentication endpoints
 api_router.include_router(
     supabase_auth.router,
-    prefix="/auth",
+    prefix="/auth/supabase",
     tags=["Authentication"]
 )
 
+api_router.include_router(
+    auth.router,  # This has your Google login endpoint
+    prefix="/auth",
+    tags=["Authentication"]
+)
 api_router.include_router(
     business.router,
     prefix="/business",

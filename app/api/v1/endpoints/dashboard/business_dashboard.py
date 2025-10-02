@@ -8,7 +8,7 @@ from app.core.dependencies import get_current_business, get_current_user
 from app.models import Business, Order, Message, User
 from app.models.order import OrderStatus
 from app.services.websocket.connection_manager import manager
-from app.core.supabase_auth import refresh_jwks_cache
+#from app.core.supabase_auth import refresh_jwks_cache
 from app.services.analytics_service import AnalyticsService
 
 router = APIRouter()

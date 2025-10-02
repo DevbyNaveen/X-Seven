@@ -1,246 +1,269 @@
+"""Simplified Supabase authentication helper with Google token support."""
 from typing import Optional, Dict, Any
-from fastapi import HTTPException, status, Depends, Header
-import jwt
+from fastapi import HTTPException, status
 import logging
-import requests
+import hashlib
 import time
-from jose import jwk, jwt
-from jose.utils import base64url_decode
-from app.config.settings import settings
 
-# Cache for JWKS keys
-_JWKS_CACHE = None
-_JWKS_CACHE_TIME = 0
-_JWKS_CACHE_DURATION = 300  # 5 minutes
-
-
-def refresh_jwks_cache():
-    """Manually refresh the JWKS cache."""
-    global _JWKS_CACHE, _JWKS_CACHE_TIME
-    _JWKS_CACHE = None
-    _JWKS_CACHE_TIME = 0
-    try:
-        jwks = get_supabase_jwks()
-        return jwks is not None
-    except:
-        return False
-
-
-def get_supabase_jwks():
-    """Fetch Supabase JWKS (JSON Web Key Set) for token verification with caching."""
-    global _JWKS_CACHE, _JWKS_CACHE_TIME
-
-    # Check if we have a valid cached version
-    current_time = time.time()
-    if _JWKS_CACHE and (current_time - _JWKS_CACHE_TIME) < _JWKS_CACHE_DURATION:
-        return _JWKS_CACHE
-
-    if not settings.SUPABASE_URL:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Supabase URL not configured"
-        )
-
-    jwks_url = f"{settings.SUPABASE_URL}/auth/v1/.well-known/jwks.json"
-    try:
-        response = requests.get(jwks_url, timeout=10)
-        response.raise_for_status()
-        jwks_data = response.json()
-
-        # Update cache
-        _JWKS_CACHE = jwks_data
-        _JWKS_CACHE_TIME = current_time
-
-        return jwks_data
-    except Exception as e:
-        logging.error(f"Failed to fetch Supabase JWKS: {e}")
-        # If we have a cached version, use it even if it's expired
-        if _JWKS_CACHE:
-            logging.warning("Using expired JWKS cache due to fetch failure")
-            return _JWKS_CACHE
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to fetch Supabase JWKS keys"
-        )
+logger = logging.getLogger(__name__)
 
 
 async def verify_supabase_token(token: str) -> Optional[Dict[str, Any]]:
     """
-    Verify a Supabase JWT token using either HS256 (with JWT secret) or RS256 (with JWKS).
-
-    Args:
-        token: Supabase JWT token
-
-    Returns:
-        Token payload if valid, None otherwise
+    Verify a Supabase access token using Supabase's built-in auth methods.
+    Also handles JWT tokens created for Google users.
     """
     try:
-        # First, decode without verification to get the kid (key ID) and algorithm
-        unverified_header = jwt.get_unverified_header(token)
-        kid = unverified_header.get("kid")
-        alg = unverified_header.get("alg", "HS256")
-
-        # Log token information for debugging
-        logging.info(f"Token algorithm: {alg}, Key ID: {kid}")
-
-        # If it's HS256, verify using the JWT secret
-        if alg == "HS256":
-            if not settings.SUPABASE_JWT_SECRET:
-                logging.error("Supabase JWT secret not configured for HS256 token verification")
-                return None
-
-            logging.info("Attempting HS256 verification with JWT secret")
-            try:
-                # For Supabase HS256 tokens, we might not need audience/issuer validation
-                # Try with just the secret first
-                try:
-                    payload = jwt.decode(
-                        token,
-                        settings.SUPABASE_JWT_SECRET,
-                        algorithms=["HS256"],
-                        # Don't require audience/issuer for Supabase tokens
-                        options={"verify_aud": False, "verify_iss": False}
-                    )
-                    logging.info("HS256 verification successful (no audience/issuer validation)")
-                    return payload
-                except:
-                    # If that fails, try with audience/issuer validation
-                    payload = jwt.decode(
-                        token,
-                        settings.SUPABASE_JWT_SECRET,
-                        algorithms=["HS256"],
-                        audience="authenticated",
-                        issuer=f"{settings.SUPABASE_URL}/auth/v1"
-                    )
-                    logging.info("HS256 verification successful (with audience/issuer validation)")
-                    return payload
-            except Exception as e:
-                logging.error(f"HS256 verification failed: {e}")
-                raise
-
-        # If it's RS256, verify using JWKS
-        elif alg == "RS256":
-            if not kid:
-                logging.error("No 'kid' in token header for RS256 token")
-                return None
-
-            logging.info("Attempting RS256 verification with JWKS")
-            # Get the JWKS and find the matching key
-            try:
-                jwks = get_supabase_jwks()
-                logging.info(f"JWKS keys count: {len(jwks.get('keys', [])) if jwks else 0}")
-                if not jwks:
-                    logging.error("Failed to fetch Supabase JWKS")
-                    return None
-
-                # Check if JWKS is empty
-                if len(jwks.get("keys", [])) == 0:
-                    logging.error("Supabase JWKS is empty - project may be configured for HS256 tokens")
-                    logging.warning("Try using HS256 tokens instead of RS256")
-                    return None
-
-                key = None
-                for jwk_key in jwks.get("keys", []):
-                    if jwk_key.get("kid") == kid:
-                        key = jwk_key
-                        break
-
-                if not key:
-                    logging.error(f"No matching key found for kid: {kid}")
-                    # Force refresh cache and try again
-                    global _JWKS_CACHE, _JWKS_CACHE_TIME
-                    _JWKS_CACHE = None
-                    _JWKS_CACHE_TIME = 0
-                    jwks = get_supabase_jwks()
-                    if jwks:
-                        for jwk_key in jwks.get("keys", []):
-                            if jwk_key.get("kid") == kid:
-                                key = jwk_key
-                                break
-
-                    if not key:
-                        logging.error(f"Still no matching key found for kid: {kid} after cache refresh")
-                        return None
-
-                # Verify the token
-                public_key = jwk.construct(key)
-                payload = jwt.decode(
-                    token,
-                    key=public_key.to_pem().decode('utf-8') if hasattr(public_key, 'to_pem') else public_key,
-                    algorithms=["RS256"],
-                    audience="authenticated",
-                    issuer=f"{settings.SUPABASE_URL}/auth/v1"
-                )
-                logging.info("RS256 verification successful")
-                return payload
-            except Exception as e:
-                logging.error(f"Error during RS256 token verification: {e}", exc_info=True)
-                return None
-
-        else:
-            logging.error(f"Unsupported algorithm: {alg}")
+        # Check if this is a Google session token FIRST
+        if token.startswith("google_session_"):
+            return await verify_google_session_token(token)
+        
+        from app.config.database import get_supabase_client
+        
+        # Get the Supabase client
+        supabase = get_supabase_client()
+        
+        # Try Supabase's built-in token verification
+        try:
+            user_response = supabase.auth.get_user(token)
+            
+            if user_response and user_response.user:
+                user = user_response.user
+                
+                return {
+                    "sub": user.id,
+                    "email": user.email,
+                    "aud": "authenticated",
+                    "role": "authenticated",
+                    "user_metadata": user.user_metadata if hasattr(user, 'user_metadata') else {},
+                    "app_metadata": user.app_metadata if hasattr(user, 'app_metadata') else {},
+                    "iat": None,
+                    "exp": None,
+                }
+            
+        except Exception as auth_error:
+            logger.warning(f"Supabase auth failed: {auth_error}")
             return None
-
-    except jwt.ExpiredSignatureError:
-        logging.warning("Supabase token expired")
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Supabase token expired",
-            headers={"WWW-Authenticate": "Bearer"},
-        )
-    except jwt.JWTClaimsError as e:
-        logging.error(f"Token claims error: {e}")
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail=f"Invalid token claims: {str(e)}",
-            headers={"WWW-Authenticate": "Bearer"},
-        )
-    except jwt.JWTError as e:
-        logging.error(f"JWT validation error: {e}")
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid token",
-            headers={"WWW-Authenticate": "Bearer"},
-        )
+            
+        return None
+            
     except Exception as e:
-        logging.error(f"Error verifying Supabase token: {e}", exc_info=True)
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Could not verify Supabase token",
-            headers={"WWW-Authenticate": "Bearer"},
-        )
-
-
-async def get_current_supabase_user(authorization: Optional[str] = Header(None)) -> Dict[str, Any]:
+        logger.error(f"Error verifying token: {e}")
+        return None
+        
+async def verify_google_session_token(token: str) -> Optional[Dict[str, Any]]:
     """
-    FastAPI dependency to get the current authenticated Supabase user from JWT token.
-
-    Usage:
-        @router.post("/protected")
-        async def protected_route(current_user: dict = Depends(get_current_supabase_user)):
-            return {"user_id": current_user["sub"], "email": current_user["email"]}
-
+    Verify a Google session token and return user information.
+    Looks up the session in the database.
+    """
+    try:
+        if not token.startswith("google_session_"):
+            return None
+            
+        # Extract session token
+        session_token = token.replace("google_session_", "")
+        
+        # Use service role client to bypass RLS
+        from app.config.database import get_supabase_service_client
+        supabase = get_supabase_service_client()
+        
+        # Look up session in database
+        session_response = supabase.table("google_sessions").select("*").eq(
+            "session_token", session_token
+        ).execute()
+        
+        if not session_response.data:
+            logger.warning(f"Google session not found: {session_token[:8]}...")
+            return None
+        
+        session_data = session_response.data[0]
+        
+        # Check if session is expired
+        current_time = int(time.time())
+        if session_data["expires_at"] < current_time:
+            logger.info(f"Google session expired for user {session_data['email']}")
+            # Delete expired session
+            supabase.table("google_sessions").delete().eq(
+                "session_token", session_token
+            ).execute()
+            return None
+        
+        logger.info(f"Valid Google session found for user {session_data['email']}")
+        
+        # Parse created_at timestamp if it exists
+        created_at_timestamp = None
+        if session_data.get("created_at"):
+            try:
+                from datetime import datetime
+                created_at_dt = datetime.fromisoformat(session_data["created_at"].replace('Z', '+00:00'))
+                created_at_timestamp = int(created_at_dt.timestamp())
+            except Exception as e:
+                logger.warning(f"Could not parse created_at timestamp: {e}")
+                created_at_timestamp = int(time.time())
+        else:
+            created_at_timestamp = int(time.time())
+        
+        return {
+            "sub": session_data["user_id"],
+            "email": session_data["email"],
+            "aud": "authenticated",
+            "role": "authenticated",
+            "user_metadata": {
+                "provider": "google",
+                "google_id": session_data["google_id"]
+            },
+            "app_metadata": {},
+            "iat": created_at_timestamp,
+            "exp": session_data["expires_at"],
+        }
+        
+    except Exception as e:
+        logger.error(f"Error verifying Google session token: {e}")
+        return None    
+async def get_current_supabase_user(token: str) -> Dict[str, Any]:
+    """
+    Get current authenticated Supabase user from access token.
+    Now supports both Supabase tokens and Google session tokens.
+    
+    Args:
+        token: Supabase access token or Google session token
+        
     Returns:
-        Decoded JWT payload containing user information
-
+        User information dictionary
+        
     Raises:
-        HTTPException: If token is missing, invalid, or expired
+        HTTPException: If token is invalid or expired
     """
-    if not authorization or not authorization.startswith("Bearer "):
+    if not token:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Authorization header with Bearer token required",
+            detail="No access token provided",
             headers={"WWW-Authenticate": "Bearer"},
         )
-
-    token = authorization.split("Bearer ")[1]
-
-    payload = await verify_supabase_token(token)
-    if not payload:
+    
+    user_data = await verify_supabase_token(token)
+    
+    if not user_data:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid Supabase token",
+            detail="Invalid or expired access token",
             headers={"WWW-Authenticate": "Bearer"},
         )
+    
+    return user_data
 
-    return payload
+# Enhanced dependency for getting user with business info
+async def get_current_user_with_business(token: str) -> Dict[str, Any]:
+    """
+    Get current user along with their business information.
+    Handles both regular Supabase users and Google OAuth users.
+    """
+    if not token:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="No access token provided",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    
+    # Handle Google session tokens differently
+    if token.startswith("google_session_"):
+        return await get_google_user_with_business(token)
+    
+    # Regular Supabase token handling
+    user_data = await verify_supabase_token(token)
+    
+    if not user_data:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid or expired access token",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    
+    # Get business information
+    from app.config.database import get_supabase_client
+    supabase = get_supabase_client()
+    
+    business_response = supabase.table("businesses").select("*").eq("owner_id", user_data["sub"]).execute()
+    
+    if business_response.data:
+        user_data["business"] = business_response.data[0]
+    
+    return user_data
+
+async def get_google_user_with_business(token: str) -> Dict[str, Any]:
+    """
+    Get Google OAuth user with their business information.
+    """
+    try:
+        user_data = await verify_google_session_token(token)
+        
+        if not user_data:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Invalid or expired Google session",
+                headers={"WWW-Authenticate": "Bearer"},
+            )
+        
+        from app.config.database import get_supabase_service_client
+        supabase = get_supabase_service_client()
+        
+        # Query by owner_id (NOT email)
+        business_response = supabase.table("businesses").select("*").eq(
+            "owner_id", user_data["sub"]  # user_data["sub"] is the user_id from google_sessions
+        ).execute()
+        
+        if business_response.data:
+            user_data["business"] = business_response.data[0]
+        else:
+            logger.warning(f"No business found for owner_id {user_data['sub']}")
+        
+        return user_data
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error getting Google user with business: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid Google session",
+            headers={"WWW-Authenticate": "Bearer"},
+        ) 
+# Legacy function for backward compatibility
+def refresh_jwks_cache():
+    """
+    Legacy function kept for backward compatibility.
+    Not needed with the new simplified authentication system.
+    """
+    logger.info("refresh_jwks_cache called - this function is deprecated and does nothing")
+    return True
+
+# Keep the manual JWT verification as a fallback (but we won't use it)
+def _manual_jwt_verification_fallback(token: str) -> Optional[Dict[str, Any]]:
+    """
+    Fallback manual JWT verification (not recommended for production).
+    This is kept for reference but we use Supabase's built-in methods instead.
+    """
+    logger.warning("Using manual JWT verification fallback - this should not happen in normal operation")
+    
+    try:
+        import jwt
+        from app.config.settings import settings
+        
+        if not settings.SUPABASE_JWT_SECRET:
+            logger.error("JWT secret not configured for manual verification")
+            return None
+            
+        # Simple HS256 verification without audience/issuer validation
+        payload = jwt.decode(
+            token,
+            settings.SUPABASE_JWT_SECRET,
+            algorithms=["HS256"],
+            options={"verify_aud": False, "verify_iss": False}
+        )
+        
+        logger.info("Manual JWT verification successful")
+        return payload
+        
+    except Exception as e:
+        logger.error(f"Manual JWT verification failed: {e}")
+        return None

@@ -6,8 +6,8 @@ from pydantic import BaseModel, Field, field_validator
 from decimal import Decimal
 from uuid import UUID
 from app.config.database import get_supabase_client
-from app.core.dependencies import get_current_business, get_current_user
-from app.models import OrderStatus, Business, User, PaymentStatus, PaymentMethod
+from app.core.dependencies import get_current_user
+from app.models import OrderStatus, PaymentStatus, PaymentMethod
 from app.services.websocket.connection_manager import manager
 import logging
 
@@ -26,7 +26,7 @@ class OrderItem(BaseModel):
 
 class OrderCreate(BaseModel):
     """Create new order."""
-    table_id: Optional[UUID] = Field(None, description="Table ID for dine-in orders")  # Changed to UUID
+    table_id: Optional[UUID] = Field(None, description="Table ID for dine-in orders")
     table_number: Optional[str] = Field(None, max_length=10, description="Table number for dine-in orders")
     customer_name: Optional[str] = Field(None, max_length=100)
     customer_phone: Optional[str] = Field(None, max_length=20)
@@ -56,7 +56,7 @@ class OrderResponse(BaseModel):
     """Order response."""
     id: UUID
     business_id: UUID
-    table_id: Optional[UUID]  # Changed to UUID
+    table_id: Optional[UUID]
     customer_name: Optional[str]
     customer_phone: Optional[str]
     customer_email: Optional[str]
@@ -74,18 +74,40 @@ class OrderResponse(BaseModel):
     updated_at: datetime
 
 
+def get_authenticated_supabase(current_user: dict = Depends(get_current_user)):
+    """Get Supabase client with proper authentication context."""
+    supabase = get_supabase_client()
+    
+    # Set the session using the user's access token
+    if current_user.get("access_token"):
+        try:
+            supabase.auth.set_session(current_user["access_token"], None)
+        except Exception as e:
+            logger.error(f"Failed to set Supabase session: {e}")
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Authentication failed"
+            )
+    
+    return supabase
+
+
 @router.post("/", response_model=OrderResponse)
 async def create_order(
     order_data: OrderCreate,
     background_tasks: BackgroundTasks,
-    business: Business = Depends(get_current_business),
-    current_user: User = Depends(get_current_user),
-    supabase = Depends(get_supabase_client)
+    current_user: dict = Depends(get_current_user),
+    supabase = Depends(get_authenticated_supabase)
 ) -> Any:
-    """
-    Create a new food order.
-    """
+    """Create a new food order."""
     try:
+        business_id = current_user.get("business_id")
+        if not business_id:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="No business associated with user"
+            )
+
         # Calculate totals
         subtotal = sum(item.quantity * item.price for item in order_data.items)
         tax_rate = Decimal('0.08')  # 8% tax
@@ -96,15 +118,17 @@ async def create_order(
         table_id = None
         if order_data.table_number:
             # Look up the table ID from the table number
-            table_response = supabase.table('tables').select('id').eq('business_id', business.id).eq('table_number', order_data.table_number).execute()
+            table_response = supabase.table('tables').select('id').eq(
+                'business_id', business_id
+            ).eq('table_number', order_data.table_number).execute()
             if table_response.data:
                 table_id = table_response.data[0]['id']
         elif order_data.table_id:
             table_id = order_data.table_id
 
         order_dict = {
-            'business_id': str(business.id),  # Convert UUID to string
-            'table_id': str(table_id) if table_id else None,  # Convert UUID to string
+            'business_id': business_id,
+            'table_id': str(table_id) if table_id else None,
             'customer_name': order_data.customer_name,
             'customer_phone': order_data.customer_phone,
             'customer_email': order_data.customer_email,
@@ -114,7 +138,7 @@ async def create_order(
                     'menu_item_id': item.menu_item_id,
                     'name': item.name,
                     'quantity': item.quantity,
-                    'price': float(item.price),  # Convert Decimal to float
+                    'price': float(item.price),
                     'special_instructions': item.special_instructions
                 } for item in order_data.items
             ],
@@ -140,13 +164,14 @@ async def create_order(
             )
 
         order = response.data[0]
+        logger.info(f"Created order {order['id']} for business {business_id}")
 
         # Send WebSocket notification
         await manager.broadcast_to_business(
-            business_id=business.id,
+            business_id=business_id,
             message={
                 "type": "new_order",
-                "order_id": str(order['id']),  # Convert UUID to string
+                "order_id": str(order['id']),
                 "table_id": str(order_data.table_id) if order_data.table_id else None,
                 "order_type": order_data.order_type,
                 "total_amount": float(total_amount),
@@ -155,7 +180,7 @@ async def create_order(
         )
 
         # Add background task for order processing
-        background_tasks.add_task(process_new_order, str(order['id']), str(business.id), supabase)
+        background_tasks.add_task(process_new_order, str(order['id']), business_id, supabase)
 
         return order
 
@@ -175,94 +200,75 @@ async def get_orders(
     order_type: Optional[str] = Query(None, description="Filter by order type"),
     table_id: Optional[UUID] = Query(None, description="Filter by table ID"),
     limit: int = Query(50, ge=1, le=100, description="Number of orders to return"),
-    business: Business = Depends(get_current_business),
-    supabase = Depends(get_supabase_client)
+    current_user: dict = Depends(get_current_user),
+    supabase = Depends(get_authenticated_supabase)
 ) -> Any:
-    """
-    Get orders with optional filtering.
-    """
+    """Get orders with optional filtering."""
     try:
-        print(f"\n=== GET ORDERS REQUEST DEBUG ===")
-        print(f"Business ID: {business.id}")
-        print(f"Status filter: {status}")
-        print(f"Order type filter: {order_type}")
-        print(f"Table ID filter: {table_id}")
-        print(f"Limit: {limit}")
+        business_id = current_user.get("business_id")
+        if not business_id:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="No business associated with user"
+            )
+
+        logger.info(f"Getting orders for business {business_id}")
         
-        query = supabase.table('orders').select('*').eq('business_id', business.id)
-        print(f"Initial query created for business_id: {business.id}")
+        query = supabase.table('orders').select('*').eq('business_id', business_id)
 
         # Apply filters
         if status:
             query = query.eq('status', status.value)
-            print(f"Applied status filter: {status.value}")
+            logger.info(f"Applied status filter: {status.value}")
         if order_type:
             query = query.eq('order_type', order_type)
-            print(f"Applied order_type filter: {order_type}")
+            logger.info(f"Applied order_type filter: {order_type}")
         if table_id:
             query = query.eq('table_id', str(table_id))
-            print(f"Applied table_id filter: {str(table_id)}")
+            logger.info(f"Applied table_id filter: {str(table_id)}")
 
         # Order by creation date (newest first)
         response = query.order('created_at', desc=True).limit(limit).execute()
         
-        print(f"\n--- SUPABASE RESPONSE ---")
-        print(f"Response status: {hasattr(response, 'data')}")
-        print(f"Response data exists: {response.data is not None}")
-        print(f"Number of orders returned: {len(response.data) if response.data else 0}")
+        logger.info(f"Found {len(response.data) if response.data else 0} orders for business {business_id}")
         
-        if response.data:
-            print(f"\n--- SAMPLE ORDER DATA (first order) ---")
-            sample_order = response.data[0]
-            print(f"Order ID: {sample_order.get('id')}")
-            print(f"Business ID: {sample_order.get('business_id')}")
-            print(f"Table ID: {sample_order.get('table_id')}")
-            print(f"Customer Name: {sample_order.get('customer_name')}")
-            print(f"Order Type: {sample_order.get('order_type')}")
-            print(f"Status: {sample_order.get('status')}")
-            print(f"Payment Status: {sample_order.get('payment_status')}")
-            print(f"Total Amount: {sample_order.get('total_amount')}")
-            print(f"Created At: {sample_order.get('created_at')}")
-            print(f"Items Count: {len(sample_order.get('items', []))}")
-            
-            print(f"\n--- ALL ORDER IDs ---")
-            for i, order in enumerate(response.data):
-                print(f"{i+1}. Order ID: {order.get('id')}, Status: {order.get('status')}, Total: {order.get('total_amount')}")
-        else:
-            print("No orders found in response")
-            
-        print(f"\n--- RETURNING DATA ---")
-        return_data = response.data if response.data else []
-        print(f"Returning {len(return_data)} orders")
-        print(f"=== END GET ORDERS DEBUG ===\n")
+        return response.data if response.data else []
 
-        return return_data
-
+    except HTTPException:
+        raise
     except Exception as e:
-        print(f"\n!!! ERROR in get_orders !!!")
-        print(f"Error type: {type(e).__name__}")
-        print(f"Error message: {str(e)}")
-        print(f"Business ID: {business.id if 'business' in locals() else 'Not available'}")
         logger.error(f"Error retrieving orders: {str(e)}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to retrieve orders: {str(e)}"
         )
+
+
 @router.get("/active", response_model=List[OrderResponse])
 async def get_active_orders(
-    business: Business = Depends(get_current_business),
-    supabase = Depends(get_supabase_client)
+    current_user: dict = Depends(get_current_user),
+    supabase = Depends(get_authenticated_supabase)
 ) -> Any:
-    """
-    Get all active orders (pending, confirmed, preparing, ready).
-    """
+    """Get all active orders (pending, confirmed, preparing, ready)."""
     try:
+        business_id = current_user.get("business_id")
+        if not business_id:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="No business associated with user"
+            )
+
         active_statuses = ['pending', 'confirmed', 'preparing', 'ready']
 
-        response = supabase.table('orders').select('*').eq('business_id', business.id).in_('status', active_statuses).order('created_at', desc=True).execute()
+        response = supabase.table('orders').select('*').eq(
+            'business_id', business_id
+        ).in_('status', active_statuses).order('created_at', desc=True).execute()
 
+        logger.info(f"Found {len(response.data) if response.data else 0} active orders for business {business_id}")
         return response.data if response.data else []
 
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Error retrieving active orders: {str(e)}")
         raise HTTPException(
@@ -274,14 +280,21 @@ async def get_active_orders(
 @router.get("/{order_id}", response_model=OrderResponse)
 async def get_order(
     order_id: UUID,
-    business: Business = Depends(get_current_business),
-    supabase = Depends(get_supabase_client)
+    current_user: dict = Depends(get_current_user),
+    supabase = Depends(get_authenticated_supabase)
 ) -> Any:
-    """
-    Get a specific order by ID.
-    """
+    """Get a specific order by ID."""
     try:
-        response = supabase.table('orders').select('*').eq('id', order_id).eq('business_id', business.id).execute()
+        business_id = current_user.get("business_id")
+        if not business_id:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="No business associated with user"
+            )
+
+        response = supabase.table('orders').select('*').eq(
+            'id', order_id
+        ).eq('business_id', business_id).execute()
 
         if not response.data:
             raise HTTPException(
@@ -289,6 +302,7 @@ async def get_order(
                 detail="Order not found"
             )
 
+        logger.info(f"Retrieved order {order_id} for business {business_id}")
         return response.data[0]
 
     except HTTPException:
@@ -306,16 +320,22 @@ async def update_order(
     order_id: UUID,
     order_update: OrderUpdate,
     background_tasks: BackgroundTasks,
-    business: Business = Depends(get_current_business),
-    current_user: User = Depends(get_current_user),
-    supabase = Depends(get_supabase_client)
+    current_user: dict = Depends(get_current_user),
+    supabase = Depends(get_authenticated_supabase)
 ) -> Any:
-    """
-    Update an order.
-    """
+    """Update an order."""
     try:
+        business_id = current_user.get("business_id")
+        if not business_id:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="No business associated with user"
+            )
+
         # Get current order
-        response = supabase.table('orders').select('*').eq('id', order_id).eq('business_id', business.id).execute()
+        response = supabase.table('orders').select('*').eq(
+            'id', order_id
+        ).eq('business_id', business_id).execute()
 
         if not response.data:
             raise HTTPException(
@@ -349,7 +369,7 @@ async def update_order(
                         'menu_item_id': item.menu_item_id,
                         'name': item.name,
                         'quantity': item.quantity,
-                        'price': float(item.price),  # Convert Decimal to float
+                        'price': float(item.price),
                         'special_instructions': item.special_instructions
                     } for item in order_update.items
                 ],
@@ -359,7 +379,9 @@ async def update_order(
             })
 
         # Update order
-        update_response = supabase.table('orders').update(update_data).eq('id', order_id).eq('business_id', business.id).execute()
+        update_response = supabase.table('orders').update(update_data).eq(
+            'id', order_id
+        ).eq('business_id', business_id).execute()
 
         if not update_response.data:
             raise HTTPException(
@@ -368,14 +390,15 @@ async def update_order(
             )
 
         updated_order = update_response.data[0]
+        logger.info(f"Updated order {order_id} for business {business_id}")
 
         # Send WebSocket notification if status changed
         if order_update.status and order_update.status.value != old_status:
             await manager.broadcast_to_business(
-                business_id=business.id,
+                business_id=business_id,
                 message={
                     "type": "order_status_update",
-                    "order_id": str(order_id),  # Convert UUID to string
+                    "order_id": str(order_id),
                     "old_status": old_status,
                     "new_status": order_update.status.value,
                     "table_id": current_order.get('table_id')
@@ -384,7 +407,7 @@ async def update_order(
 
         # Add background task for order processing if status changed
         if order_update.status:
-            background_tasks.add_task(process_order_status_change, str(order_id), order_update.status.value, str(business.id), supabase)
+            background_tasks.add_task(process_order_status_change, str(order_id), order_update.status.value, business_id, supabase)
 
         return updated_order
 
@@ -402,16 +425,22 @@ async def update_order(
 async def cancel_order(
     order_id: UUID,
     reason: Optional[str] = Query(None, max_length=500, description="Cancellation reason"),
-    business: Business = Depends(get_current_business),
-    current_user: User = Depends(get_current_user),
-    supabase = Depends(get_supabase_client)
+    current_user: dict = Depends(get_current_user),
+    supabase = Depends(get_authenticated_supabase)
 ) -> Any:
-    """
-    Cancel an order.
-    """
+    """Cancel an order."""
     try:
+        business_id = current_user.get("business_id")
+        if not business_id:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="No business associated with user"
+            )
+
         # Get current order
-        response = supabase.table('orders').select('*').eq('id', order_id).eq('business_id', business.id).execute()
+        response = supabase.table('orders').select('*').eq(
+            'id', order_id
+        ).eq('business_id', business_id).execute()
 
         if not response.data:
             raise HTTPException(
@@ -433,11 +462,13 @@ async def cancel_order(
             'status': 'cancelled',
             'updated_at': datetime.utcnow().isoformat(),
             'cancellation_reason': reason,
-            'cancelled_by': str(current_user.id),  # Convert UUID to string
+            'cancelled_by': current_user["id"],
             'cancelled_at': datetime.utcnow().isoformat()
         }
 
-        update_response = supabase.table('orders').update(update_data).eq('id', order_id).eq('business_id', business.id).execute()
+        update_response = supabase.table('orders').update(update_data).eq(
+            'id', order_id
+        ).eq('business_id', business_id).execute()
 
         if not update_response.data:
             raise HTTPException(
@@ -445,12 +476,14 @@ async def cancel_order(
                 detail="Failed to cancel order"
             )
 
+        logger.info(f"Cancelled order {order_id} for business {business_id}")
+
         # Send WebSocket notification
         await manager.broadcast_to_business(
-            business_id=business.id,
+            business_id=business_id,
             message={
                 "type": "order_cancelled",
-                "order_id": str(order_id),  # Convert UUID to string
+                "order_id": str(order_id),
                 "table_id": current_order.get('table_id'),
                 "reason": reason
             }
@@ -470,19 +503,25 @@ async def cancel_order(
 
 @router.put("/{order_id}/payment", response_model=OrderResponse)
 async def process_payment(
-    order_id: UUID,  # Changed from int to UUID
+    order_id: UUID,
     payment_amount: Decimal = Query(..., gt=0, description="Payment amount"),
     payment_method: PaymentMethod = Query(..., description="Payment method"),
-    business: Business = Depends(get_current_business),
-    current_user: User = Depends(get_current_user),
-    supabase = Depends(get_supabase_client)
+    current_user: dict = Depends(get_current_user),
+    supabase = Depends(get_authenticated_supabase)
 ) -> Any:
-    """
-    Process payment for an order.
-    """
+    """Process payment for an order."""
     try:
+        business_id = current_user.get("business_id")
+        if not business_id:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="No business associated with user"
+            )
+
         # Get current order
-        response = supabase.table('orders').select('*').eq('id', order_id).eq('business_id', business.id).execute()
+        response = supabase.table('orders').select('*').eq(
+            'id', order_id
+        ).eq('business_id', business_id).execute()
 
         if not response.data:
             raise HTTPException(
@@ -516,7 +555,9 @@ async def process_payment(
             'updated_at': datetime.utcnow().isoformat()
         }
 
-        update_response = supabase.table('orders').update(update_data).eq('id', order_id).eq('business_id', business.id).execute()
+        update_response = supabase.table('orders').update(update_data).eq(
+            'id', order_id
+        ).eq('business_id', business_id).execute()
 
         if not update_response.data:
             raise HTTPException(
@@ -525,13 +566,14 @@ async def process_payment(
             )
 
         updated_order = update_response.data[0]
+        logger.info(f"Processed payment for order {order_id}, amount: {payment_amount}")
 
         # Send WebSocket notification
         await manager.broadcast_to_business(
-            business_id=business.id,
+            business_id=business_id,
             message={
                 "type": "payment_completed",
-                "order_id": str(order_id),  # Convert UUID to string
+                "order_id": str(order_id),
                 "amount": float(payment_amount),
                 "payment_method": payment_method.value,
                 "table_id": current_order.get('table_id')
@@ -553,18 +595,25 @@ async def process_payment(
 @router.get("/stats/summary")
 async def get_order_stats(
     days: int = Query(30, ge=1, le=365, description="Number of days to analyze"),
-    business: Business = Depends(get_current_business),
-    supabase = Depends(get_supabase_client)
+    current_user: dict = Depends(get_current_user),
+    supabase = Depends(get_authenticated_supabase)
 ) -> Any:
-    """
-    Get order statistics summary.
-    """
+    """Get order statistics summary."""
     try:
+        business_id = current_user.get("business_id")
+        if not business_id:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="No business associated with user"
+            )
+
         # Calculate date range
         start_date = datetime.now() - timedelta(days=days)
 
         # Get orders for the period
-        response = supabase.table('orders').select('*').eq('business_id', business.id).gte('created_at', start_date.isoformat()).execute()
+        response = supabase.table('orders').select('*').eq(
+            'business_id', business_id
+        ).gte('created_at', start_date.isoformat()).execute()
 
         orders = response.data if response.data else []
 
@@ -585,6 +634,8 @@ async def get_order_stats(
             date_key = order['created_at'][:10]  # YYYY-MM-DD
             daily_orders[date_key] = daily_orders.get(date_key, 0) + 1
 
+        logger.info(f"Generated stats for business {business_id}: {total_orders} orders, ${total_revenue} revenue")
+
         return {
             "period_days": days,
             "total_orders": total_orders,
@@ -596,6 +647,8 @@ async def get_order_stats(
             "daily_order_counts": daily_orders
         }
 
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Error retrieving order stats: {str(e)}")
         raise HTTPException(
@@ -605,7 +658,7 @@ async def get_order_stats(
 
 
 # Background task functions
-async def process_new_order(order_id: str, business_id: str, supabase):  # Changed parameter types to str
+async def process_new_order(order_id: str, business_id: str, supabase):
     """Process a new order (send notifications, update inventory, etc.)"""
     try:
         logger.info(f"Processing new order {order_id} for business {business_id}")
@@ -617,7 +670,7 @@ async def process_new_order(order_id: str, business_id: str, supabase):  # Chang
         logger.error(f"Error processing new order {order_id}: {str(e)}")
 
 
-async def process_order_status_change(order_id: str, new_status: str, business_id: str, supabase):  # Changed parameter types to str
+async def process_order_status_change(order_id: str, new_status: str, business_id: str, supabase):
     """Process order status changes"""
     try:
         logger.info(f"Processing status change for order {order_id} to {new_status}")
