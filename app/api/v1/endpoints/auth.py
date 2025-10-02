@@ -90,9 +90,7 @@ async def login(credentials: LoginRequest):
 
 @router.post("/google/login", response_model=TokenResponse)
 async def google_login_simple(user_data: GoogleUserData):
-    """
-    Handle Google OAuth login by creating/finding user and returning session token
-    """
+    """Handle Google OAuth login by creating/finding user and returning session token"""
     try:
         from app.config.database import get_supabase_service_client
         supabase = get_supabase_service_client()
@@ -100,7 +98,6 @@ async def google_login_simple(user_data: GoogleUserData):
         # Find business by email
         business_response = supabase.table("businesses").select("*").eq("email", user_data.email).execute()
         
-        # If not found by email, try by google_id
         if not business_response.data:
             business_response = supabase.table("businesses").select("*").eq("google_id", user_data.google_id).execute()
         
@@ -121,23 +118,47 @@ async def google_login_simple(user_data: GoogleUserData):
                 detail="Your account has been deactivated. Please contact support"
             )
         
-        # CRITICAL: Use owner_id from the business record (the Supabase Auth user ID)
         user_id = business_data["owner_id"]
         business_id = business_data["id"]
         
         logger.info(f"Google login successful for user {user_data.email}, user_id: {user_id}, business_id: {business_id}")
         
-        # Generate unique session token
+        # Try to generate a real Supabase auth token
+        try:
+            admin_link = supabase.auth.admin.generate_link({
+                "type": "magiclink",
+                "email": user_data.email,
+            })
+            
+            # Access properties directly, not via .get()
+            if admin_link and hasattr(admin_link, 'properties'):
+                properties = admin_link.properties
+                access_token = properties.access_token if hasattr(properties, 'access_token') else None
+                
+                if access_token:
+                    logger.info(f"Generated real Supabase auth token for Google user {user_data.email}")
+                    
+                    return TokenResponse(
+                        access_token=access_token,
+                        user_id=user_id,
+                        email=user_data.email,
+                        role="owner",
+                        business_id=business_id,
+                        expires_in=3600
+                    )
+        except Exception as auth_error:
+            logger.error(f"Failed to generate Supabase auth token: {auth_error}")
+            # Continue to fallback
+        
+        # Fallback: Custom session token (less secure but works)
         session_token = str(uuid.uuid4())
         expires_at = int(time.time()) + 3600
         
-        # Delete old sessions
         supabase.table("google_sessions").delete().eq("user_id", user_id).execute()
         
-        # Store new session with the correct owner_id
         session_insert = supabase.table("google_sessions").insert({
             "session_token": session_token,
-            "user_id": user_id,  # This now matches owner_id from businesses table
+            "user_id": user_id,
             "email": user_data.email,
             "google_id": user_data.google_id,
             "expires_at": expires_at
@@ -164,9 +185,7 @@ async def google_login_simple(user_data: GoogleUserData):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Authentication failed"
-        )
-    
-          
+        )           
 @router.post("/refresh", response_model=TokenResponse)
 async def refresh_token(
     credentials: HTTPAuthorizationCredentials = Depends(security)

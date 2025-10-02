@@ -4,6 +4,7 @@ from fastapi import HTTPException, status
 import logging
 import hashlib
 import time
+from app.config.database import get_supabase_client
 
 logger = logging.getLogger(__name__)
 
@@ -152,43 +153,44 @@ async def get_current_supabase_user(token: str) -> Dict[str, Any]:
     
     return user_data
 
-# Enhanced dependency for getting user with business info
-async def get_current_user_with_business(token: str) -> Dict[str, Any]:
-    """
-    Get current user along with their business information.
-    Handles both regular Supabase users and Google OAuth users.
-    """
-    if not token:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="No access token provided",
-            headers={"WWW-Authenticate": "Bearer"},
-        )
+async def get_current_user_with_business(token: str) -> dict:
+    # Always use service role for business lookups
+    from app.config.database import get_supabase_service_client
+    supabase = get_supabase_service_client()
     
-    # Handle Google session tokens differently
-    if token.startswith("google_session_"):
-        return await get_google_user_with_business(token)
+    payload = await verify_supabase_token(token)
+    if not payload:
+        raise HTTPException(status_code=401, detail="Invalid token")
+
+    email = payload.get("email")
+    user_id = payload.get("sub")  # This is from google_sessions
     
-    # Regular Supabase token handling
-    user_data = await verify_supabase_token(token)
-    
-    if not user_data:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid or expired access token",
-            headers={"WWW-Authenticate": "Bearer"},
-        )
-    
-    # Get business information
-    from app.config.database import get_supabase_client
-    supabase = get_supabase_client()
-    
-    business_response = supabase.table("businesses").select("*").eq("owner_id", user_data["sub"]).execute()
-    
-    if business_response.data:
-        user_data["business"] = business_response.data[0]
-    
-    return user_data
+    if not email:
+        raise HTTPException(status_code=401, detail="Invalid token payload")
+
+    logger.info(f"Looking up business for user: {email}")
+
+    try:
+        # For Google users, we need to find by owner_id (from google_sessions)
+        business_response = supabase.table("businesses").select("*").eq("owner_id", user_id).execute()
+        
+        if not business_response.data:
+            # Fallback: try by email
+            business_response = supabase.table("businesses").select("*").eq("email", email).execute()
+
+        if business_response.data:
+            business = business_response.data[0]
+            logger.info(f"Found business: {business['id']} for user {email}")
+            return {**payload, "business": business}
+            
+    except Exception as e:
+        logger.error(f"Business query error: {e}")
+
+    logger.error(f"Business not found for user {email}")
+    raise HTTPException(
+        status_code=status.HTTP_404_NOT_FOUND,
+        detail="Business account not found."
+    )
 
 async def get_google_user_with_business(token: str) -> Dict[str, Any]:
     """

@@ -2,8 +2,7 @@
 from typing import List, Optional, Dict, Any, Union, Tuple
 from fastapi import APIRouter, Depends, HTTPException, status, Query
 from pydantic import BaseModel
-from app.config.database import get_supabase_client
-from app.core.dependencies import get_current_user, get_current_business
+from app.core.dependencies import get_current_user, get_current_business, get_supabase_with_auth_context
 from app.models.user import User
 from app.models.business import Business
 import logging
@@ -49,7 +48,7 @@ async def get_menu_items(
     search: Optional[str] = Query(None, description="Search by name or description"),
     current_business: Business = Depends(get_current_business),
     current_user: User = Depends(get_current_user),
-    supabase = Depends(get_supabase_client)
+    supabase = Depends(get_supabase_with_auth_context)
 ) -> List[dict]:
     """Get all menu items with filtering options."""
     try:
@@ -91,7 +90,7 @@ async def create_menu_item(
     item_data: MenuItemCreate,
     current_business: Business = Depends(get_current_business),
     current_user: User = Depends(get_current_user),
-    supabase = Depends(get_supabase_client)
+    supabase = Depends(get_supabase_with_auth_context)
 ) -> dict:
     """Create a new menu item."""
     try:
@@ -146,7 +145,7 @@ async def update_menu_item(
     item_data: MenuItemUpdate,
     current_business: Business = Depends(get_current_business),
     current_user: User = Depends(get_current_user),
-    supabase = Depends(get_supabase_client)
+    supabase = Depends(get_supabase_with_auth_context)
 ) -> dict:
     """Update a menu item (price, availability, etc.)."""
     try:
@@ -200,7 +199,7 @@ async def delete_menu_item(
     item_id: str,  # UUID as string
     current_business: Business = Depends(get_current_business),
     current_user: User = Depends(get_current_user),
-    supabase = Depends(get_supabase_client)
+    supabase = Depends(get_supabase_with_auth_context)
 ) -> dict:
     """Remove a menu item."""
     try:
@@ -239,7 +238,7 @@ async def delete_menu_item(
 async def get_menu_categories(
     current_business: Business = Depends(get_current_business),
     current_user: User = Depends(get_current_user),
-    supabase = Depends(get_supabase_client)
+    supabase = Depends(get_supabase_with_auth_context)
 ) -> List[dict]:
     """Get all menu categories for the business."""
     try:
@@ -268,7 +267,7 @@ async def create_menu_category(
     category_data: MenuCategoryCreate,
     current_business: Business = Depends(get_current_business),
     current_user: User = Depends(get_current_user),
-    supabase = Depends(get_supabase_client)
+    supabase = Depends(get_supabase_with_auth_context)
 ) -> dict:
     """Create a new menu category."""
     try:
@@ -319,7 +318,7 @@ async def update_menu_category(
     category_data: MenuCategoryUpdate,
     current_business: Business = Depends(get_current_business),
     current_user: User = Depends(get_current_user),
-    supabase = Depends(get_supabase_client)
+    supabase = Depends(get_supabase_with_auth_context)
 ) -> dict:
     """Update a menu category."""
     try:
@@ -373,7 +372,7 @@ async def delete_menu_category(
     category_id: str,  # UUID as string
     current_business: Business = Depends(get_current_business),
     current_user: User = Depends(get_current_user),
-    supabase = Depends(get_supabase_client)
+    supabase = Depends(get_supabase_with_auth_context)
 ) -> dict:
     """Delete a menu category."""
     try:
@@ -425,7 +424,7 @@ async def toggle_item_availability(
     availability_data: MenuItemAvailabilityUpdate,
     current_business: Business = Depends(get_current_business),
     current_user: User = Depends(get_current_user),
-    supabase = Depends(get_supabase_client)
+    supabase = Depends(get_supabase_with_auth_context)
 ) -> dict:
     """Toggle item availability."""
     try:

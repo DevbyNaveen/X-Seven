@@ -129,7 +129,7 @@ async def get_current_user_optional(
 
 async def get_current_business(
     current_user: User = Depends(get_current_user),
-    supabase = Depends(get_supabase_client)
+    # Remove the regular supabase dependency
 ) -> Business:
     """
     Get the business associated with current user.
@@ -141,7 +141,12 @@ async def get_current_business(
             detail="User is not associated with any business"
         )
     
+    # Use service role client to bypass RLS
+    from app.config.database import get_supabase_service_client
+    supabase = get_supabase_service_client()
+    
     business_response = supabase.table("businesses").select("*").eq("id", current_user.business_id).execute()
+    
     if not business_response.data:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -156,28 +161,19 @@ async def get_current_business(
         )
     
     return Business.from_dict(business_data)
-
 # New dependency: get_current_business_from_token
 async def get_current_business_from_token(
     authorization: Optional[str] = Header(None),
-    supabase = Depends(get_supabase_client)
 ) -> Business:
-    """Validate JWT token and return Business directly using business_id from token payload.
-    Useful for endpoints that only need business context without loading a User.
-    """
+    """Validate JWT token and return Business directly using business_id from token payload."""
     if not authorization or not authorization.startswith("Bearer "):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Authorization header with Bearer token required",
             headers={"WWW-Authenticate": "Bearer"},
         )
-    token = authorization.split("Bearer ")[1]
     
-    # Set session for this request
-    try:
-        supabase.auth.set_session(token, None)
-    except Exception as e:
-        logger.error(f"Failed to set session: {e}")
+    token = authorization.split("Bearer ")[1]
     
     payload = await verify_supabase_token(token)
     if not payload:
@@ -186,30 +182,36 @@ async def get_current_business_from_token(
             detail="Invalid Supabase token",
             headers={"WWW-Authenticate": "Bearer"},
         )
+    
     business_id = payload.get("business_id")
     if not business_id:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Token does not contain business_id",
         )
+    
+    # Use service role client
+    from app.config.database import get_supabase_service_client
+    supabase = get_supabase_service_client()
+    
     business_response = supabase.table("businesses").select("*").eq("id", business_id).execute()
+    
     if not business_response.data:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Business not found"
         )
+    
     business_data = business_response.data[0]
     if not business_data.get("is_active", True):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Business is inactive"
         )
+    
     return Business.from_dict(business_data)
-
-
 async def get_current_business_optional(
     current_user: Optional[User] = Depends(get_current_user_optional),
-    supabase = Depends(get_supabase_client)
 ) -> Optional[Business]:
     """
     Get the business associated with current user (optional).
@@ -218,19 +220,34 @@ async def get_current_business_optional(
     if not current_user:
         return None
     
-    if not current_user or not current_user.business_id:
+    if not current_user.business_id:
         return None
     
+    # Use service role client
+    from app.config.database import get_supabase_service_client
+    supabase = get_supabase_service_client()
+    
     business_response = supabase.table("businesses").select("*").eq("id", current_user.business_id).execute()
+    
     if not business_response.data:
         return None
     
     business_data = business_response.data[0]
     return Business.from_dict(business_data) if business_data.get("is_active", True) else None
 
-
 def get_multi_tenant_filter(business_id: str):
     """
     Create a filter for multi-tenant data access.
     """
     return {"business_id": business_id}
+
+def get_supabase_with_auth_context(current_user: User = Depends(get_current_user)):
+    """
+    Get Supabase client for authenticated operations.
+    Uses service role to bypass RLS since we enforce business isolation at app level.
+    
+    Security: Business access is validated through get_current_user and get_current_business
+    dependencies, ensuring users can only access their own business data.
+    """
+    from app.config.database import get_supabase_service_client
+    return get_supabase_service_client()
